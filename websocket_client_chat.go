@@ -25,7 +25,7 @@ const (
 	audioChannels = 1
 	bitDepth      = 2                                          // 16-bit PCM = 2字节
 	bufferSize    = 10 * sampleRate * audioChannels * bitDepth // 10秒缓冲区
-	wsURL         = "ws://stea.studio26f.org:3000/api/v1/chat/ws?token=aaaaaa-b-cccccc-dddddd"
+	wsURL         = "wss://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=aaaaaa-b-cccccc-dddddd"
 	controlFile   = "/tmp/chatctrl"
 )
 
