@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,13 +19,16 @@ import (
 )
 
 const (
-	deviceSN      = "DEV-001"
-	sampleRate    = 16000 // 采样率
-	audioChannels = 1
-	bitDepth      = 2                                          // 16-bit PCM = 2字节
-	bufferSize    = 10 * sampleRate * audioChannels * bitDepth // 10秒缓冲区
-	wsURL         = "wss://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=aaaaaa-b-cccccc-dddddd"
-	controlFile   = "/tmp/chatctrl"
+	deviceSN         = "DEV-001"
+	sampleRate       = 16000 // 采样率
+	audioChannels    = 1
+	bitDepth         = 2                                           // 16-bit PCM = 2字节
+	bufferSize       = 10 * sampleRate * audioChannels * bitDepth  // 10秒缓冲区
+	chunkDuration    = 200                                         // 每个音频块的时长（毫秒）
+	chunkSampleCount = sampleRate * chunkDuration / 1000           // 每个块的采样数量
+	chunkByteSize    = chunkSampleCount * audioChannels * bitDepth // 每个块的字节数
+	wsURL            = "wss://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=aaaaaa-b-cccccc-dddddd"
+	controlFile      = "/tmp/chatctrl"
 )
 
 // 更新请求标志位
@@ -45,6 +47,9 @@ type (
 	InputAudioCompleteRequest struct {
 		ID     string `json:"id"`
 		Action string `json:"action"`
+		Data   struct {
+			Buffer string `json:"buffer"`
+		} `json:"data"`
 	}
 
 	OutputAudioStreamResponse struct {
@@ -224,6 +229,10 @@ type AppState struct {
 	audioMutex         sync.Mutex
 	audioComplete      bool
 	audioCompleteMutex sync.Mutex
+	// 流式发送相关
+	streamingRequestID string
+	streamingBuffer    []int16
+	streamingMutex     sync.Mutex
 }
 
 func main() {
@@ -334,13 +343,6 @@ func recordThread(state *AppState) {
 				if state.Recording {
 					log.Println("停止录音...")
 					stopRecording(state, &stream, &audioBuffer)
-
-					if _, err := os.Stat("input.wav"); err == nil {
-						log.Println("准备发送录音文件...")
-						go sendRecording(state)
-					} else {
-						log.Printf("录音文件不存在: %v", err)
-					}
 				} else {
 					log.Println("未在录音状态，忽略停止命令")
 				}
@@ -353,10 +355,34 @@ func startRecording(state *AppState, stream **portaudio.Stream, buffer *[]int16)
 	state.Recording = true
 	*buffer = make([]int16, 0)
 
+	// 生成流式请求ID并发送更新配置
+	state.streamingMutex.Lock()
+	state.streamingRequestID = generateRequestID()
+	state.streamingBuffer = make([]int16, 0, chunkSampleCount*2) // 预分配容量
+	state.streamingMutex.Unlock()
+
+	// 发送配置更新请求
+	go sendUpdateConfig(state, state.streamingRequestID)
+
 	var err error
 	*stream, err = portaudio.OpenDefaultStream(1, 0, float64(sampleRate), 0, func(in []int16) {
 		if state.Recording {
 			*buffer = append(*buffer, in...)
+
+			// 流式发送处理
+			state.streamingMutex.Lock()
+			state.streamingBuffer = append(state.streamingBuffer, in...)
+
+			// 当缓冲区达到200ms的数据量时发送
+			for len(state.streamingBuffer) >= chunkSampleCount {
+				chunk := make([]int16, chunkSampleCount)
+				copy(chunk, state.streamingBuffer[:chunkSampleCount])
+				state.streamingBuffer = state.streamingBuffer[chunkSampleCount:]
+
+				// 异步发送避免阻塞录音
+				go sendAudioChunk(state, state.streamingRequestID, chunk, false)
+			}
+			state.streamingMutex.Unlock()
 		}
 	})
 	if err != nil {
@@ -380,80 +406,32 @@ func stopRecording(state *AppState, stream **portaudio.Stream, buffer *[]int16) 
 		*stream = nil
 	}
 
-	if len(*buffer) > 0 {
-		if err := saveAsWAV(*buffer); err != nil {
-			log.Printf("保存录音失败: %v", err)
-			return
-		}
-		log.Println("录音文件保存成功")
-		*buffer = nil
+	// 发送剩余的音频数据作为完成请求
+	state.streamingMutex.Lock()
+	remainingBuffer := make([]int16, len(state.streamingBuffer))
+	copy(remainingBuffer, state.streamingBuffer)
+	requestID := state.streamingRequestID
+	state.streamingBuffer = nil
+	state.streamingMutex.Unlock()
+
+	if len(remainingBuffer) > 0 {
+		log.Printf("发送最后的音频数据: %d 采样点", len(remainingBuffer))
+		go sendAudioChunk(state, requestID, remainingBuffer, true) // true表示这是最后一包
+	} else {
+		// 没有剩余数据，直接发送完成请求
+		go sendCompleteRequest(state, requestID, nil)
 	}
 }
 
-func saveAsWAV(buffer []int16) error {
-	header := make([]byte, 44)
-	copy(header[0:4], "RIFF")
-	fileSize := len(buffer)*2 + 36
-	binary.LittleEndian.PutUint32(header[4:8], uint32(fileSize))
-	copy(header[8:12], "WAVE")
-	copy(header[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(header[16:20], 16)
-	binary.LittleEndian.PutUint16(header[20:22], 1)
-	binary.LittleEndian.PutUint16(header[22:24], 1)
-	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))
-	byteRate := sampleRate * 1 * 16 / 8
-	binary.LittleEndian.PutUint32(header[28:32], uint32(byteRate))
-	binary.LittleEndian.PutUint16(header[32:34], 2)
-	binary.LittleEndian.PutUint16(header[34:36], 16)
-	copy(header[36:40], "data")
-	dataSize := len(buffer) * 2
-	binary.LittleEndian.PutUint32(header[40:44], uint32(dataSize))
-
-	file, err := os.Create("input.wav")
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.Write(header); err != nil {
-		return err
-	}
-
-	for _, sample := range buffer {
-		if err := binary.Write(file, binary.LittleEndian, sample); err != nil {
-			return err
-		}
-	}
-
-	log.Println("录音文件保存成功")
-	return nil
-}
-
-func sendRecording(state *AppState) {
-	// 重置音频缓冲区，准备接收新的音频流
-	state.audioMutex.Lock()
-	state.audioBuffer = NewRingBuffer(bufferSize * 3)
-	state.audioComplete = false
-	state.audioMutex.Unlock()
-
+func sendUpdateConfig(state *AppState, requestID string) {
 	state.wsMutex.Lock()
 	defer state.wsMutex.Unlock()
 
 	if state.WsConn == nil {
-		log.Println("WebSocket未连接,无法发送录音")
+		log.Println("WebSocket未连接,无法发送配置更新")
 		return
 	}
 
-	audioData, err := ioutil.ReadFile("input.wav")
-	if err != nil {
-		log.Printf("读取录音文件失败: %v", err)
-		return
-	}
-
-	// 生成唯一请求ID
-	requestID := generateRequestID()
-
-	// 0. 发送更新请求
 	updateMsg := UpdateConfigRequest{
 		ID:     requestID,
 		Action: "updateConfig",
@@ -480,6 +458,7 @@ func sendRecording(state *AppState) {
 			},
 		},
 	}
+
 	updateData, err := json.Marshal(updateMsg)
 	if err != nil {
 		log.Printf("JSON编码更新请求失败: %v", err)
@@ -500,33 +479,73 @@ func sendRecording(state *AppState) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	g_updateFlag = 0
-	// 获取响应成功，准备发生录音
-	log.Println("更新响应成功，准备发送录音")
-	// 1. 发送音频流请求
+	log.Println("更新响应成功，开始流式录音发送")
+}
+
+func sendAudioChunk(state *AppState, requestID string, audioSamples []int16, isLast bool) {
+	// 转换int16采样为字节数据
+	audioBytes := make([]byte, len(audioSamples)*2)
+	for i, sample := range audioSamples {
+		audioBytes[i*2] = byte(sample & 0xFF)
+		audioBytes[i*2+1] = byte((sample >> 8) & 0xFF)
+	}
+
+	if isLast {
+		// 发送最后一包作为完成请求
+		go sendCompleteRequest(state, requestID, audioBytes)
+		return
+	}
+
+	state.wsMutex.Lock()
+	defer state.wsMutex.Unlock()
+
+	if state.WsConn == nil {
+		log.Println("WebSocket未连接,无法发送音频数据")
+		return
+	}
+
+	// 发送普通的音频流请求
 	msg := InputAudioStreamRequest{
 		ID:     requestID,
 		Action: "inputAudioStream",
 	}
-	msg.Data.Buffer = base64.StdEncoding.EncodeToString(audioData)
+	msg.Data.Buffer = base64.StdEncoding.EncodeToString(audioBytes)
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("JSON编码失败: %v", err)
+		log.Printf("JSON编码音频流失败: %v", err)
 		return
 	}
 
-	log.Println("正在发送录音数据...")
 	if err := state.WsConn.WriteMessage(websocket.TextMessage, data); err != nil {
-		log.Printf("发送录音失败: %v", err)
+		log.Printf("发送音频流失败: %v", err)
 		return
 	}
-	log.Println("录音数据发送成功")
+	log.Printf("发送音频数据块: %d 字节", len(audioBytes))
+}
 
-	// 2. 发送完成通知
+func sendCompleteRequest(state *AppState, requestID string, lastAudioBytes []byte) {
+	state.wsMutex.Lock()
+	defer state.wsMutex.Unlock()
+
+	if state.WsConn == nil {
+		log.Println("WebSocket未连接,无法发送完成请求")
+		return
+	}
+
 	completeMsg := InputAudioCompleteRequest{
 		ID:     requestID,
 		Action: "inputAudioComplete",
 	}
+
+	if len(lastAudioBytes) > 0 {
+		completeMsg.Data.Buffer = base64.StdEncoding.EncodeToString(lastAudioBytes)
+		log.Printf("发送完成请求(包含最后%d字节音频)", len(lastAudioBytes))
+	} else {
+		completeMsg.Data.Buffer = ""
+		log.Println("发送完成请求(无剩余音频)")
+	}
+
 	completeData, err := json.Marshal(completeMsg)
 	if err != nil {
 		log.Printf("JSON编码完成消息失败: %v", err)
@@ -603,7 +622,7 @@ func handleUpdateConfig(message []byte, state *AppState) {
 		return
 	}
 
-	log.Printf("收到配置更新响应: %s", resp)
+	log.Printf("收到配置更新响应: Success=%v, Message=%s", resp.Success, resp.Message)
 	g_updateFlag = 1
 
 }
