@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -418,7 +420,7 @@ func stopRecording(state *AppState, stream **portaudio.Stream, buffer *[]int16) 
 		log.Printf("发送最后的音频数据: %d 采样点", len(remainingBuffer))
 		go sendAudioChunk(state, requestID, remainingBuffer, true) // true表示这是最后一包
 	} else {
-		// 没有剩余数据，直接发送完成请求
+		// 没有剩余数据，直接发送空的完成请求
 		go sendCompleteRequest(state, requestID, nil)
 	}
 }
@@ -445,10 +447,10 @@ func sendUpdateConfig(state *AppState, requestID string) {
 				Longitude float64 `json:"longitude"`
 			} `json:"location"`
 		}{
-			ConversationId: "test",
-			SpeechRate:     0,
-			VoiceId:        "xiaole",
-			OutputText:     false,
+			// ConversationId: generateUUID(),
+			SpeechRate: 0,
+			VoiceId:    "xiaole",
+			OutputText: false,
 			Location: struct {
 				Latitude  float64 `json:"latitude"`
 				Longitude float64 `json:"longitude"`
@@ -483,16 +485,12 @@ func sendUpdateConfig(state *AppState, requestID string) {
 }
 
 func sendAudioChunk(state *AppState, requestID string, audioSamples []int16, isLast bool) {
-	// 转换int16采样为字节数据
-	audioBytes := make([]byte, len(audioSamples)*2)
-	for i, sample := range audioSamples {
-		audioBytes[i*2] = byte(sample & 0xFF)
-		audioBytes[i*2+1] = byte((sample >> 8) & 0xFF)
-	}
+	// 转换为WAV格式数据
+	wavData := convertSamplesToWAV(audioSamples)
 
 	if isLast {
 		// 发送最后一包作为完成请求
-		go sendCompleteRequest(state, requestID, audioBytes)
+		go sendCompleteRequest(state, requestID, wavData)
 		return
 	}
 
@@ -509,7 +507,7 @@ func sendAudioChunk(state *AppState, requestID string, audioSamples []int16, isL
 		ID:     requestID,
 		Action: "inputAudioStream",
 	}
-	msg.Data.Buffer = base64.StdEncoding.EncodeToString(audioBytes)
+	msg.Data.Buffer = base64.StdEncoding.EncodeToString(wavData)
 
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -521,10 +519,10 @@ func sendAudioChunk(state *AppState, requestID string, audioSamples []int16, isL
 		log.Printf("发送音频流失败: %v", err)
 		return
 	}
-	log.Printf("发送音频数据块: %d 字节", len(audioBytes))
+	log.Printf("发送WAV音频数据块: %d 字节 (包含44字节头部)", len(wavData))
 }
 
-func sendCompleteRequest(state *AppState, requestID string, lastAudioBytes []byte) {
+func sendCompleteRequest(state *AppState, requestID string, wavData []byte) {
 	state.wsMutex.Lock()
 	defer state.wsMutex.Unlock()
 
@@ -538,9 +536,9 @@ func sendCompleteRequest(state *AppState, requestID string, lastAudioBytes []byt
 		Action: "inputAudioComplete",
 	}
 
-	if len(lastAudioBytes) > 0 {
-		completeMsg.Data.Buffer = base64.StdEncoding.EncodeToString(lastAudioBytes)
-		log.Printf("发送完成请求(包含最后%d字节音频)", len(lastAudioBytes))
+	if len(wavData) > 0 {
+		completeMsg.Data.Buffer = base64.StdEncoding.EncodeToString(wavData)
+		log.Printf("发送完成请求(包含最后%d字节WAV音频)", len(wavData))
 	} else {
 		completeMsg.Data.Buffer = ""
 		log.Println("发送完成请求(无剩余音频)")
@@ -561,6 +559,69 @@ func sendCompleteRequest(state *AppState, requestID string, lastAudioBytes []byt
 
 func generateRequestID() string {
 	return fmt.Sprintf("%s-%d", deviceSN, time.Now().UnixNano())
+}
+
+// 生成UUID v4
+func generateUUID() string {
+	uuid := make([]byte, 16)
+	rand.Read(uuid)
+
+	// 设置版本 (4) 和变体位
+	uuid[6] = (uuid[6] & 0x0f) | 0x40 // Version 4
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // Variant 10
+
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+}
+
+// 生成WAV头部
+func generateWAVHeader(dataSize int) []byte {
+	header := make([]byte, 44)
+
+	// RIFF chunk
+	copy(header[0:4], "RIFF")
+	fileSize := dataSize + 36
+	binary.LittleEndian.PutUint32(header[4:8], uint32(fileSize))
+	copy(header[8:12], "WAVE")
+
+	// fmt chunk
+	copy(header[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(header[16:20], 16)                    // fmt chunk size
+	binary.LittleEndian.PutUint16(header[20:22], 1)                     // audio format (PCM)
+	binary.LittleEndian.PutUint16(header[22:24], uint16(audioChannels)) // channels
+	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))    // sample rate
+
+	byteRate := sampleRate * audioChannels * bitDepth
+	binary.LittleEndian.PutUint32(header[28:32], uint32(byteRate)) // byte rate
+
+	blockAlign := audioChannels * bitDepth
+	binary.LittleEndian.PutUint16(header[32:34], uint16(blockAlign)) // block align
+	binary.LittleEndian.PutUint16(header[34:36], uint16(bitDepth*8)) // bits per sample
+
+	// data chunk
+	copy(header[36:40], "data")
+	binary.LittleEndian.PutUint32(header[40:44], uint32(dataSize)) // data size
+
+	return header
+}
+
+// 将int16采样数据转换为WAV格式的字节数据
+func convertSamplesToWAV(audioSamples []int16) []byte {
+	// PCM数据
+	pcmData := make([]byte, len(audioSamples)*2)
+	for i, sample := range audioSamples {
+		binary.LittleEndian.PutUint16(pcmData[i*2:], uint16(sample))
+	}
+
+	// 生成WAV头部
+	header := generateWAVHeader(len(pcmData))
+
+	// 合并头部和数据
+	wavData := make([]byte, 0, len(header)+len(pcmData))
+	wavData = append(wavData, header...)
+	wavData = append(wavData, pcmData...)
+
+	return wavData
 }
 
 func websocketThread(state *AppState) {
