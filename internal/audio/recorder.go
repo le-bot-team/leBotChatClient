@@ -2,7 +2,9 @@ package audio
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"websocket_client_chat/internal/config"
@@ -21,6 +23,11 @@ type AudioHandler interface {
 type Recorder struct {
 	config  *config.AudioConfig
 	handler AudioHandler
+
+	// 音频设备状态
+	targetDevice        *portaudio.DeviceInfo
+	isPortAudioInit     bool
+	deviceInitialized   bool
 
 	// 录制状态
 	isRecording bool
@@ -49,12 +56,64 @@ func NewRecorder(cfg *config.AudioConfig, handler AudioHandler) *Recorder {
 	}
 }
 
-// Initialize 初始化PortAudio
+// Initialize 初始化音频设备
 func (r *Recorder) Initialize() error {
-	return portaudio.Initialize()
+	if r.isPortAudioInit {
+		return nil
+	}
+
+	// 初始化PortAudio
+	if err := portaudio.Initialize(); err != nil {
+		return fmt.Errorf("PortAudio初始化失败: %v", err)
+	}
+	r.isPortAudioInit = true
+
+	// 查找音频设备
+	if err := r.findAudioDevice(); err != nil {
+		portaudio.Terminate()
+		r.isPortAudioInit = false
+		return err
+	}
+
+	r.deviceInitialized = true
+	return nil
 }
 
-// Terminate 终止PortAudio
+// findAudioDevice 查找合适的音频输入设备
+func (r *Recorder) findAudioDevice() error {
+	host, err := portaudio.DefaultHostApi()
+	if err != nil {
+		return fmt.Errorf("获取Host API失败: %v", err)
+	}
+
+	// 设备匹配逻辑
+	for _, dev := range host.Devices {
+		if (strings.Contains(strings.ToLower(dev.Name), "audiocodec") ||
+			strings.Contains(dev.Name, "hw:0,0")) &&
+			dev.MaxInputChannels >= r.config.Channels {
+			r.targetDevice = dev
+			break
+		}
+	}
+
+	// 回退到默认设备
+	if r.targetDevice == nil {
+		if defDev, err := portaudio.DefaultInputDevice(); err == nil {
+			r.targetDevice = defDev
+			log.Println("警告：使用默认输入设备作为回退")
+		} else {
+			return fmt.Errorf("未找到可用的录音设备")
+		}
+	}
+
+	log.Printf("使用录音设备: %s (输入通道: %d, 默认采样率: %f, 配置采样率: %d)",
+		r.targetDevice.Name, r.targetDevice.MaxInputChannels,
+		r.targetDevice.DefaultSampleRate, r.config.SampleRate)
+
+	return nil
+}
+
+// Terminate 终止音频系统
 func (r *Recorder) Terminate() error {
 	r.cancel()
 
@@ -66,11 +125,21 @@ func (r *Recorder) Terminate() error {
 	}
 	r.mutex.Unlock()
 
-	return portaudio.Terminate()
+	if r.isPortAudioInit {
+		err := portaudio.Terminate()
+		r.isPortAudioInit = false
+		r.deviceInitialized = false
+		return err
+	}
+	return nil
 }
 
 // StartRecording 开始录音
 func (r *Recorder) StartRecording(requestID string) error {
+	if !r.deviceInitialized {
+		return fmt.Errorf("音频设备未初始化")
+	}
+
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -84,25 +153,31 @@ func (r *Recorder) StartRecording(requestID string) error {
 	r.streamingBuffer = make([]int16, 0, r.config.ChunkSampleCount*2)
 	r.streamingMutex.Unlock()
 
+	// 配置音频流参数
+	params := portaudio.StreamParameters{
+		Input: portaudio.StreamDeviceParameters{
+			Device:   r.targetDevice,
+			Channels: r.config.Channels,
+			Latency:  r.targetDevice.DefaultLowInputLatency,
+		},
+		SampleRate:      float64(r.config.SampleRate),
+		FramesPerBuffer: 1024,
+	}
+
 	var err error
-	r.stream, err = portaudio.OpenDefaultStream(
-		1, 0, // 输入1通道，输出0通道
-		float64(r.config.SampleRate),
-		0, // 使用默认缓冲区大小
-		r.audioCallback,
-	)
+	r.stream, err = portaudio.OpenStream(params, r.audioCallback)
 	if err != nil {
-		return err
+		return fmt.Errorf("打开音频流失败: %v", err)
 	}
 
 	if err := r.stream.Start(); err != nil {
 		r.stream.Close()
 		r.stream = nil
-		return err
+		return fmt.Errorf("启动录音失败: %v", err)
 	}
 
 	r.isRecording = true
-	log.Println("开始录音...")
+	log.Printf("开始录音 (设备: %s, 采样率: %dHz)", r.targetDevice.Name, r.config.SampleRate)
 	return nil
 }
 
