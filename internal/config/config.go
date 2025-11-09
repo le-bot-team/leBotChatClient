@@ -36,6 +36,7 @@ type ControlConfig struct {
 	FilePath      string        `json:"filePath"`
 	MonitorDelay  time.Duration `json:"monitorDelay"`
 	ChannelBuffer int           `json:"channelBuffer"`
+	UseStdin      bool          `json:"useStdin"` // 使用标准输入控制（调试模式）
 }
 
 // DeviceConfig 设备配置
@@ -76,8 +77,8 @@ func DefaultConfig() *Config {
 			ChunkByteSize:    chunkByteSize,
 		},
 		WebSocket: WebSocketConfig{
-			//URL:            "wss://cafuuchino.studio26f.org:10543/api/v1/chat/ws?token=0199794a-1f94-7000-a52a-16612c2731c6",
-			URL:            "ws://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=0199794a-1f94-7000-a52a-16612c2731c6",
+			URL: "wss://cafuuchino.studio26f.org:10543/api/v1/chat/ws?token=019a667c-1231-7000-a662-08221ad75f4a",
+			//URL:            "ws://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=019a667c-1231-7000-a662-08221ad75f4a",
 			ReconnectDelay: 5 * time.Second,
 			PingInterval:   30 * time.Second,
 			WriteTimeout:   10 * time.Second,
@@ -87,6 +88,7 @@ func DefaultConfig() *Config {
 		Control: ControlConfig{
 			FilePath:      "/tmp/chatctrl",
 			MonitorDelay:  100 * time.Millisecond,
+			UseStdin:      true, // 默认使用标准输入（调试模式）
 			ChannelBuffer: 1,
 		},
 		Device: DeviceConfig{

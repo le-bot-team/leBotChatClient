@@ -20,10 +20,11 @@ type App struct {
 	config *config.Config
 
 	// 各组件
-	recorder    *audio.Recorder
-	player      *audio.Player
-	wsClient    *websocket.Client
-	fileMonitor *control.FileMonitor
+	recorder     *audio.Recorder
+	player       *audio.Player
+	wsClient     *websocket.Client
+	fileMonitor  *control.FileMonitor
+	stdinMonitor *control.StdinMonitor
 
 	// 状态管理
 	updateFlag int32 // 更新响应标志位
@@ -49,7 +50,13 @@ func NewApp() *App {
 	app.recorder = audio.NewRecorder(&cfg.Audio, app)
 	app.player = audio.NewPlayer(&cfg.Audio)
 	app.wsClient = websocket.NewClient(&cfg.WebSocket, app)
-	app.fileMonitor = control.NewFileMonitor(&cfg.Control, app)
+
+	// 根据配置选择控制方式
+	if cfg.Control.UseStdin {
+		app.stdinMonitor = control.NewStdinMonitor(&cfg.Control, app)
+	} else {
+		app.fileMonitor = control.NewFileMonitor(&cfg.Control, app)
+	}
 
 	return app
 }
@@ -61,20 +68,31 @@ func (app *App) Start() error {
 		return err
 	}
 
-	// 启动各组件
+	// 启动WebSocket客户端
 	if err := app.wsClient.Start(); err != nil {
 		return err
 	}
 
-	if err := app.fileMonitor.Start(); err != nil {
-		return err
+	// 启动相应的控制监控器
+	if app.config.Control.UseStdin {
+		if err := app.stdinMonitor.Start(); err != nil {
+			return err
+		}
+		log.Println("语音对讲系统启动成功 (标准输入控制模式)")
+		log.Println("输入命令:")
+		log.Println("  1 或 start - 开始录音")
+		log.Println("  2 或 stop  - 停止录音并发送")
+		log.Println("  q 或 quit  - 退出程序")
+	} else {
+		if err := app.fileMonitor.Start(); err != nil {
+			return err
+		}
+		log.Println("语音对讲系统启动成功 (文件控制模式)")
+		log.Println("使用说明:")
+		log.Println("向/tmp/chatctrl写入:")
+		log.Println("  1 - 开始录音")
+		log.Println("  2 - 停止录音并发送")
 	}
-
-	log.Println("语音对讲系统启动成功")
-	log.Println("使用说明:")
-	log.Println("向/tmp/chatctrl写入:")
-	log.Println("1 - 开始录音")
-	log.Println("2 - 停止录音并发送")
 
 	return nil
 }
@@ -84,8 +102,16 @@ func (app *App) Stop() error {
 	app.cancel()
 
 	// 停止各组件
-	if err := app.fileMonitor.Stop(); err != nil {
-		log.Printf("停止文件监控失败: %v", err)
+	if app.fileMonitor != nil {
+		if err := app.fileMonitor.Stop(); err != nil {
+			log.Printf("停止文件监控失败: %v", err)
+		}
+	}
+
+	if app.stdinMonitor != nil {
+		if err := app.stdinMonitor.Stop(); err != nil {
+			log.Printf("停止标准输入监控失败: %v", err)
+		}
 	}
 
 	if err := app.wsClient.Stop(); err != nil {
