@@ -30,7 +30,7 @@ To enable this mode, set `UseStdin` to `true` in the Control configuration:
 
 ```go
 Control: ControlConfig{
-    FilePath:      "/tmp/chatctrl",
+    FilePath:      "/tmp/chat-control",
     MonitorDelay:  100 * time.Millisecond,
     ChannelBuffer: 1,
     UseStdin:      true,  // Enable stdin control mode
@@ -39,7 +39,7 @@ Control: ControlConfig{
 
 ## 2. File Control Mode
 
-This mode monitors a control file (`/tmp/chatctrl` by default) for commands. It's useful for automation or when running as a service.
+This mode monitors a control file (`/tmp/chat-control` by default) for commands. It's useful for automation or when running as a service.
 
 ### Usage
 
@@ -50,7 +50,7 @@ When the application starts, you'll see:
 ```
 语音对讲系统启动成功 (文件控制模式)
 使用说明:
-向/tmp/chatctrl写入:
+向/tmp/chat-control写入:
   1 - 开始录音
   2 - 停止录音并发送
 ```
@@ -61,10 +61,10 @@ Write to the control file to send commands:
 
 ```bash
 # Start recording
-echo "1" > /tmp/chatctrl
+echo "1" > /tmp/chat-control
 
 # Stop recording
-echo "2" > /tmp/chatctrl
+echo "2" > /tmp/chat-control
 ```
 
 ### Configuration
@@ -73,7 +73,7 @@ To enable this mode, set `UseStdin` to `false` in the Control configuration:
 
 ```go
 Control: ControlConfig{
-    FilePath:      "/tmp/chatctrl",
+    FilePath:      "/tmp/chat-control",
     MonitorDelay:  100 * time.Millisecond,
     ChannelBuffer: 1,
     UseStdin:      false,  // Enable file control mode
@@ -86,7 +86,7 @@ To switch between modes, modify the `internal/config/config.go` file and change 
 
 ```go
 Control: ControlConfig{
-    FilePath:      "/tmp/chatctrl",
+    FilePath:      "/tmp/chat-control",
     MonitorDelay:  100 * time.Millisecond,
     ChannelBuffer: 1,
     UseStdin:      true,  // true for stdin mode, false for file mode

@@ -49,8 +49,14 @@ func (p *Player) Stop() error {
 
 	p.mutex.Lock()
 	if p.stream != nil {
-		p.stream.Stop()
-		p.stream.Close()
+		stopErr := p.stream.Stop()
+		if stopErr != nil {
+			return stopErr
+		}
+		closeErr := p.stream.Close()
+		if closeErr != nil {
+			return closeErr
+		}
 		p.stream = nil
 	}
 	p.mutex.Unlock()
@@ -102,8 +108,16 @@ func (p *Player) playAudio() {
 		p.mutex.Lock()
 		p.isPlaying = false
 		if p.stream != nil {
-			p.stream.Stop()
-			p.stream.Close()
+			stopErr := p.stream.Stop()
+			if stopErr != nil {
+				log.Printf("停止音频流失败: %v", stopErr)
+				return
+			}
+			closeErr := p.stream.Close()
+			if closeErr != nil {
+				log.Printf("关闭音频流失败: %v", closeErr)
+				return
+			}
 			p.stream = nil
 		}
 		p.mutex.Unlock()
@@ -183,7 +197,11 @@ func (p *Player) playAudio() {
 	// 启动流
 	if err := p.stream.Start(); err != nil {
 		log.Printf("启动音频流失败: %v", err)
-		p.stream.Close()
+		err := p.stream.Close()
+		if err != nil {
+			log.Printf("关闭音频流失败: %v", err)
+			return
+		}
 		p.stream = nil
 		return
 	}

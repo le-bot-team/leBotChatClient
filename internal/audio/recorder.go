@@ -25,9 +25,9 @@ type Recorder struct {
 	handler AudioHandler
 
 	// 音频设备状态
-	targetDevice        *portaudio.DeviceInfo
-	isPortAudioInit     bool
-	deviceInitialized   bool
+	targetDevice      *portaudio.DeviceInfo
+	isPortAudioInit   bool
+	deviceInitialized bool
 
 	// 录制状态
 	isRecording bool
@@ -70,7 +70,10 @@ func (r *Recorder) Initialize() error {
 
 	// 查找音频设备
 	if err := r.findAudioDevice(); err != nil {
-		portaudio.Terminate()
+		err := portaudio.Terminate()
+		if err != nil {
+			return err
+		}
 		r.isPortAudioInit = false
 		return err
 	}
@@ -84,6 +87,9 @@ func (r *Recorder) findAudioDevice() error {
 	host, err := portaudio.DefaultHostApi()
 	if err != nil {
 		return fmt.Errorf("获取Host API失败: %v", err)
+	}
+	if host == nil {
+		return fmt.Errorf("获取Host API返回nil")
 	}
 
 	// 设备匹配逻辑
@@ -119,8 +125,14 @@ func (r *Recorder) Terminate() error {
 
 	r.mutex.Lock()
 	if r.stream != nil {
-		r.stream.Stop()
-		r.stream.Close()
+		stopErr := r.stream.Stop()
+		if stopErr != nil {
+			return stopErr
+		}
+		closeErr := r.stream.Close()
+		if closeErr != nil {
+			return closeErr
+		}
 		r.stream = nil
 	}
 	r.mutex.Unlock()
@@ -171,7 +183,10 @@ func (r *Recorder) StartRecording(requestID string) error {
 	}
 
 	if err := r.stream.Start(); err != nil {
-		r.stream.Close()
+		err := r.stream.Close()
+		if err != nil {
+			return err
+		}
 		r.stream = nil
 		return fmt.Errorf("启动录音失败: %v", err)
 	}
@@ -193,8 +208,14 @@ func (r *Recorder) StopRecording() error {
 	r.isRecording = false
 
 	if r.stream != nil {
-		r.stream.Stop()
-		r.stream.Close()
+		stopErr := r.stream.Stop()
+		if stopErr != nil {
+			return stopErr
+		}
+		closeErr := r.stream.Close()
+		if closeErr != nil {
+			return closeErr
+		}
 		r.stream = nil
 	}
 

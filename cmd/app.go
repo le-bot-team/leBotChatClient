@@ -89,7 +89,7 @@ func (app *App) Start() error {
 		}
 		log.Println("语音对讲系统启动成功 (文件控制模式)")
 		log.Println("使用说明:")
-		log.Println("向/tmp/chatctrl写入:")
+		log.Println("向/tmp/chat-control写入:")
 		log.Println("  1 - 开始录音")
 		log.Println("  2 - 停止录音并发送")
 	}
@@ -203,7 +203,7 @@ func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
 }
 
 // OnRecordingComplete 录制完成
-func (app *App) OnRecordingComplete(requestID string, samples []int16) {
+func (app *App) OnRecordingComplete(requestID string, _ []int16) {
 	app.wg.Add(1)
 	go func() {
 		defer app.wg.Done()
@@ -236,7 +236,7 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 }
 
 // HandleOutputAudioComplete 处理输出音频完成
-func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteResponse) {
+func (app *App) HandleOutputAudioComplete(_ *websocket.OutputAudioCompleteResponse) {
 	app.player.SetAudioComplete(true)
 }
 

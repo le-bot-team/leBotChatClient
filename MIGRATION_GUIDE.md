@@ -124,7 +124,7 @@ const (
     deviceSN         = "DEV-001"
     sampleRate       = 16000
     wsURL            = "wss://..."
-    controlFile      = "/tmp/chatctrl"
+    controlFile      = "/tmp/chat-control"
 )
 ```
 

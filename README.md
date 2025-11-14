@@ -114,10 +114,10 @@ go build -o chat-client ./cmd
 
 ```bash
 # 开始录音
-echo 1 > /tmp/chatctrl
+echo 1 > /tmp/chat-control
 
 # 停止录音并发送
-echo 2 > /tmp/chatctrl
+echo 2 > /tmp/chat-control
 ```
 
 ## 配置说明

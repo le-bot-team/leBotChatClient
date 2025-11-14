@@ -86,7 +86,7 @@ func DefaultConfig() *Config {
 			MaxMessageSize: 1024 * 1024, // 1MB
 		},
 		Control: ControlConfig{
-			FilePath:      "/tmp/chatctrl",
+			FilePath:      "/tmp/chat-control",
 			MonitorDelay:  100 * time.Millisecond,
 			UseStdin:      true, // 默认使用标准输入（调试模式）
 			ChannelBuffer: 1,
