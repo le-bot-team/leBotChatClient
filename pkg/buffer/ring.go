@@ -134,6 +134,13 @@ func (rb *RingBuffer) IsEmpty() bool {
 	return atomic.LoadInt32(&rb.count) == 0
 }
 
+// Clear 清空缓冲区中的所有数据
+func (rb *RingBuffer) Clear() {
+	atomic.StoreInt32(&rb.r, 0)
+	atomic.StoreInt32(&rb.w, 0)
+	atomic.StoreInt32(&rb.count, 0)
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

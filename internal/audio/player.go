@@ -91,6 +91,28 @@ func (p *Player) SetAudioComplete(complete bool) {
 	}
 }
 
+// ClearBuffer 清除音频缓冲区
+func (p *Player) ClearBuffer() {
+	p.audioBuffer.Clear()
+	log.Println("已清除音频缓冲区")
+}
+
+// StopPlayback 立即停止播放（用于打断）
+func (p *Player) StopPlayback() {
+	p.mutex.Lock()
+	if p.stream != nil && p.isPlaying {
+		log.Println("打断播放，停止音频流...")
+		// 设置标志但不直接关闭 stream，让 playAudio 自然退出
+		p.isPlaying = false
+	}
+	p.mutex.Unlock()
+
+	// 清除缓冲区
+	p.ClearBuffer()
+	// 重置完成标志
+	p.SetAudioComplete(false)
+}
+
 // IsPlaying 检查是否正在播放
 func (p *Player) IsPlaying() bool {
 	p.mutex.RLock()

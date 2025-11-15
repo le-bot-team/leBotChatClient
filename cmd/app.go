@@ -236,8 +236,42 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 }
 
 // HandleOutputAudioComplete 处理输出音频完成
-func (app *App) HandleOutputAudioComplete(_ *websocket.OutputAudioCompleteResponse) {
+func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteResponse) {
+	log.Printf("音频输出完成: 会话ID=%s, 对话ID=%s",
+		resp.Data.ConversationId, resp.Data.ChatId)
 	app.player.SetAudioComplete(true)
+}
+
+// HandleOutputTextStream 处理输出文本流
+func (app *App) HandleOutputTextStream(resp *websocket.OutputTextStreamResponse) {
+	log.Printf("收到文本流: ID=%s, 角色=%s, 文本=%s",
+		resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+}
+
+// HandleOutputTextComplete 处理输出文本完成
+func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteResponse) {
+	log.Printf("文本输出完成: ID=%s, 角色=%s, 文本=%s",
+		resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+
+	// 如果是用户消息完成且文本长度>=2，说明用户发送了新消息，执行打断逻辑
+	if resp.Data.Role == "user" && len(resp.Data.Text) >= 2 {
+		if app.player.IsPlaying() {
+			log.Println("检测到用户新消息，执行打断逻辑")
+			app.player.StopPlayback()
+		}
+	}
+}
+
+// HandleChatComplete 处理聊天完成
+func (app *App) HandleChatComplete(resp *websocket.ChatCompleteResponse) {
+	log.Printf("聊天完成: ID=%s, 成功=%v, 消息=%s",
+		resp.Data.ChatId, resp.Success, resp.Message)
+
+	if !resp.Success {
+		for _, err := range resp.Data.Errors {
+			log.Printf("错误 [%d]: %s", err.Code, err.Message)
+		}
+	}
 }
 
 // HandleUpdateConfig 处理更新配置响应

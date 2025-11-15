@@ -46,6 +46,7 @@ type DeviceConfig struct {
 	SpeechRate   int      `json:"speechRate"`
 	OutputText   bool     `json:"outputText"`
 	Location     Location `json:"location"`
+	Timezone     string   `json:"timezone,omitempty"` // 时区，例如 "Asia/Shanghai"
 }
 
 // Location 位置信息
@@ -95,11 +96,12 @@ func DefaultConfig() *Config {
 			SerialNumber: "DEV-001",
 			VoiceID:      "xiaole",
 			SpeechRate:   0,
-			OutputText:   false,
+			OutputText:   true, // 启用文本输出以支持打断逻辑
 			Location: Location{
 				Latitude:  0,
 				Longitude: 0,
 			},
+			Timezone: "Asia/Shanghai", // 默认时区
 		},
 	}
 }

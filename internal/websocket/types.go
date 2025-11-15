@@ -33,6 +33,66 @@ type OutputAudioStreamResponse struct {
 type OutputAudioCompleteResponse struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
+	Data   struct {
+		ChatId         string `json:"chatId"`
+		ConversationId string `json:"conversationId"`
+	} `json:"data"`
+}
+
+// OutputTextStreamResponse 输出文本流响应
+type OutputTextStreamResponse struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+	Data    struct {
+		ChatId         string `json:"chatId"`
+		ConversationId string `json:"conversationId"`
+		Role           string `json:"role"` // "assistant" or "user"
+		Text           string `json:"text"`
+	} `json:"data"`
+}
+
+// OutputTextCompleteResponse 输出文本完成响应
+type OutputTextCompleteResponse struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+	Data    struct {
+		ChatId         string `json:"chatId"`
+		ConversationId string `json:"conversationId"`
+		Role           string `json:"role"` // "assistant" or "user"
+		Text           string `json:"text"`
+	} `json:"data"`
+}
+
+// ChatCompleteResponse 聊天完成响应
+type ChatCompleteResponse struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ChatId         string `json:"chatId"`
+		ConversationId string `json:"conversationId"`
+		CreatedAt      int64  `json:"createdAt"`
+		CompletedAt    int64  `json:"completedAt"`
+		Errors         []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors,omitempty"`
+	} `json:"data"`
+}
+
+// CancelOutputRequest 取消输出请求
+type CancelOutputRequest struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+}
+
+// ClearContextRequest 清除上下文请求
+type ClearContextRequest struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
 }
 
 // GenericServerResponse 通用服务器响应
@@ -53,6 +113,7 @@ type UpdateConfigRequest struct {
 			Latitude  float64 `json:"latitude"`
 			Longitude float64 `json:"longitude"`
 		} `json:"location"`
+		Timezone string `json:"timezone,omitempty"`
 	} `json:"data"`
 }
 

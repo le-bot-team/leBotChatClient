@@ -1,6 +1,65 @@
 # 语音对讲系统 - 重构版本
 
-## 项目结构说明
+> **最新更新**: 2025-11-14 - 已完全对齐前端 WebSocket 协议，支持打断逻辑和文本流处理
+> 
+> 📖 查看 [更新日志](CHANGELOG.md) | [升级指南](UPGRADE_GUIDE.md)
+
+## 项目概述
+
+这是一个基于 WebSocket 的实时语音对讲系统客户端，支持：
+- ✅ 实时语音录制和流式传输
+- ✅ 流式音频播放
+- ✅ 智能打断（用户可随时打断 AI 回复）
+- ✅ 文本流接收和处理
+- ✅ 自动重连和心跳检测
+- ✅ 多种控制模式（标准输入/文件控制）
+
+## 快速开始
+
+### 安装依赖
+
+```bash
+# 安装 PortAudio（音频库）
+# Ubuntu/Debian
+sudo apt-get install portaudio19-dev
+
+# macOS
+brew install portaudio
+
+# 安装 Go 依赖
+go mod download
+```
+
+### 运行
+
+```bash
+# 开发模式（使用标准输入控制）
+go run ./cmd
+
+# 或者构建后运行
+go build -o chat-client ./cmd
+./chat-client
+```
+
+### 使用说明
+
+#### 标准输入控制模式（默认）
+```
+输入命令:
+  1 或 start - 开始录音
+  2 或 stop  - 停止录音并发送
+  q 或 quit  - 退出程序
+```
+
+#### 文件控制模式
+修改配置将 `UseStdin` 设为 `false`，然后：
+```bash
+# 开始录音
+echo 1 > /tmp/chat-control
+
+# 停止录音
+echo 2 > /tmp/chat-control
+```
 
 优化后的项目采用了清晰的模块化架构，遵循Go语言的标准项目布局：
 
@@ -58,7 +117,40 @@ leBotChatClient/
 - 上下文控制goroutine生命周期
 - 原子操作处理共享状态
 
-## 主要组件
+## 主要特性
+
+### 🎙️ 音频处理
+- **流式录制**: 实时录制音频并分块发送（200ms/块）
+- **流式播放**: 接收到音频立即开始播放，降低延迟
+- **打断支持**: 用户可随时打断 AI 回复，系统自动停止播放并清空缓冲区
+
+### 💬 WebSocket 通信
+- **完整协议支持**: 对齐前端实现，支持所有消息类型
+  - `inputAudioStream` / `inputAudioComplete` - 音频输入
+  - `outputAudioStream` / `outputAudioComplete` - 音频输出
+  - `outputTextStream` / `outputTextComplete` - 文本流
+  - `chatComplete` - 会话完成
+  - `updateConfig` - 配置更新
+  - `cancelOutput` - 取消输出
+  - `clearContext` - 清除上下文
+- **自动重连**: 断线自动重连，无需手动干预
+- **心跳检测**: 保持连接活跃，及时发现网络问题
+
+### 🎯 智能打断逻辑
+系统会自动检测用户的新消息：
+1. 监听 `outputTextComplete` 消息
+2. 当收到用户消息（`role: "user"` 且文本长度≥2）
+3. 自动停止当前播放的音频
+4. 清空音频缓冲区
+5. 准备接收新的响应
+
+### ⚙️ 灵活配置
+- 支持自定义采样率、声道数等音频参数
+- 可配置 WebSocket 连接参数
+- 支持设备信息和位置配置
+- 支持时区配置（如 "Asia/Shanghai"）
+
+## 项目结构
 
 ### App（应用程序核心）
 - 统一管理所有组件的生命周期

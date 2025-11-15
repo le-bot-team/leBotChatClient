@@ -18,6 +18,9 @@ import (
 type MessageHandler interface {
 	HandleOutputAudioStream(resp *OutputAudioStreamResponse)
 	HandleOutputAudioComplete(resp *OutputAudioCompleteResponse)
+	HandleOutputTextStream(resp *OutputTextStreamResponse)
+	HandleOutputTextComplete(resp *OutputTextCompleteResponse)
+	HandleChatComplete(resp *ChatCompleteResponse)
 	HandleUpdateConfig(resp *UpdateConfigResponse)
 }
 
@@ -106,6 +109,7 @@ func (c *Client) SendUpdateConfig(requestID string, deviceConfig *config.DeviceC
 	updateMsg.Data.OutputText = deviceConfig.OutputText
 	updateMsg.Data.Location.Latitude = deviceConfig.Location.Latitude
 	updateMsg.Data.Location.Longitude = deviceConfig.Location.Longitude
+	updateMsg.Data.Timezone = deviceConfig.Timezone
 
 	return c.SendMessage(updateMsg)
 }
@@ -132,6 +136,24 @@ func (c *Client) SendAudioComplete(requestID string, wavData []byte) error {
 		msg.Data.Buffer = base64.StdEncoding.EncodeToString(wavData)
 	}
 
+	return c.SendMessage(msg)
+}
+
+// SendCancelOutput 发送取消输出请求
+func (c *Client) SendCancelOutput(requestID string) error {
+	msg := CancelOutputRequest{
+		ID:     requestID,
+		Action: "cancelOutput",
+	}
+	return c.SendMessage(msg)
+}
+
+// SendClearContext 发送清除上下文请求
+func (c *Client) SendClearContext(requestID string) error {
+	msg := ClearContextRequest{
+		ID:     requestID,
+		Action: "clearContext",
+	}
 	return c.SendMessage(msg)
 }
 
@@ -282,9 +304,30 @@ func (c *Client) handleMessage(message []byte) error {
 	case "outputAudioComplete":
 		var resp OutputAudioCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析完成响应失败: %w", err)
+			return fmt.Errorf("解析音频完成响应失败: %w", err)
 		}
 		c.handler.HandleOutputAudioComplete(&resp)
+
+	case "outputTextStream":
+		var resp OutputTextStreamResponse
+		if err := json.Unmarshal(message, &resp); err != nil {
+			return fmt.Errorf("解析文本流响应失败: %w", err)
+		}
+		c.handler.HandleOutputTextStream(&resp)
+
+	case "outputTextComplete":
+		var resp OutputTextCompleteResponse
+		if err := json.Unmarshal(message, &resp); err != nil {
+			return fmt.Errorf("解析文本完成响应失败: %w", err)
+		}
+		c.handler.HandleOutputTextComplete(&resp)
+
+	case "chatComplete":
+		var resp ChatCompleteResponse
+		if err := json.Unmarshal(message, &resp); err != nil {
+			return fmt.Errorf("解析聊天完成响应失败: %w", err)
+		}
+		c.handler.HandleChatComplete(&resp)
 
 	case "updateConfig":
 		var resp UpdateConfigResponse
