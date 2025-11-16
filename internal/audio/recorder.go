@@ -96,13 +96,70 @@ func (r *Recorder) findAudioDevice() error {
 		return fmt.Errorf("获取Host API返回nil")
 	}
 
-	// 设备匹配逻辑
+	// 在debug模式下列出所有可用设备
+	if r.enableDebug {
+		log.Println("=== 可用的音频输入设备 ===")
+		for i, dev := range host.Devices {
+			if dev.MaxInputChannels > 0 {
+				log.Printf("[%d] %s (输入通道: %d, 采样率: %.0f Hz)",
+					i, dev.Name, dev.MaxInputChannels, dev.DefaultSampleRate)
+			}
+		}
+		log.Println("=========================")
+	}
+
+	// 优先级匹配逻辑（按优先级从高到低）
+	var candidates []*portaudio.DeviceInfo
+	var priorities []int
+
 	for _, dev := range host.Devices {
-		if (strings.Contains(strings.ToLower(dev.Name), "audiocodec") ||
-			strings.Contains(dev.Name, "hw:0,0")) &&
-			dev.MaxInputChannels >= r.config.Channels {
-			r.targetDevice = dev
-			break
+		if dev.MaxInputChannels < r.config.Channels {
+			continue
+		}
+
+		devNameLower := strings.ToLower(dev.Name)
+		priority := 0
+
+		// 优先级1: 明确的麦克风设备
+		if strings.Contains(devNameLower, "microphone") ||
+			strings.Contains(devNameLower, "mic") {
+			priority = 100
+		}
+
+		// 优先级2: 数字麦克风(通常质量较好)
+		if strings.Contains(devNameLower, "digital") {
+			priority += 50
+		}
+
+		// 优先级3: sof-hda-dsp 设备
+		if strings.Contains(devNameLower, "sof-hda-dsp") {
+			priority += 40
+		}
+
+		// 优先级4: 嵌入式特定设备
+		if strings.Contains(devNameLower, "audiocodec") ||
+			strings.Contains(dev.Name, "hw:0,0") {
+			priority += 30
+		}
+
+		// 排除不需要的设备
+		if strings.Contains(devNameLower, "monitor") ||
+			strings.Contains(devNameLower, "loopback") {
+			continue
+		}
+
+		if priority > 0 {
+			candidates = append(candidates, dev)
+			priorities = append(priorities, priority)
+		}
+	}
+
+	// 选择优先级最高的设备
+	maxPriority := -1
+	for i, p := range priorities {
+		if p > maxPriority {
+			maxPriority = p
+			r.targetDevice = candidates[i]
 		}
 	}
 
@@ -110,18 +167,18 @@ func (r *Recorder) findAudioDevice() error {
 	if r.targetDevice == nil {
 		if defDev, err := portaudio.DefaultInputDevice(); err == nil {
 			r.targetDevice = defDev
-			if r.enableDebug {
-				log.Println("警告：使用默认输入设备作为回退")
-			}
+			log.Println("警告：未找到匹配的录音设备，使用默认输入设备")
 		} else {
 			return fmt.Errorf("未找到可用的录音设备")
 		}
 	}
 
+	log.Printf("选中录音设备: %s (输入通道: %d, 默认采样率: %.0f Hz)",
+		r.targetDevice.Name, r.targetDevice.MaxInputChannels, r.targetDevice.DefaultSampleRate)
+
 	if r.enableDebug {
-		log.Printf("使用录音设备: %s (输入通道: %d, 默认采样率: %f, 捕获采样率: %d, 输出采样率: %d)",
-			r.targetDevice.Name, r.targetDevice.MaxInputChannels,
-			r.targetDevice.DefaultSampleRate, r.config.CaptureSampleRate, r.config.SampleRate)
+		log.Printf("捕获采样率: %d Hz, 输出采样率: %d Hz",
+			r.config.CaptureSampleRate, r.config.SampleRate)
 	}
 
 	return nil
@@ -176,21 +233,51 @@ func (r *Recorder) StartRecording(requestID string) error {
 	r.resampleBuffer = make([]int16, 0, r.config.ChunkSampleCount*2)
 	r.streamingMutex.Unlock()
 
-	// 配置音频流参数 - 使用硬件原生采样率
+	// 确定实际使用的采样率
+	actualSampleRate := r.config.CaptureSampleRate
+
+	// 如果设备不支持配置的采样率，尝试使用设备的默认采样率
+	if r.targetDevice.DefaultSampleRate > 0 &&
+		r.targetDevice.DefaultSampleRate != float64(r.config.CaptureSampleRate) {
+		if r.enableDebug {
+			log.Printf("设备默认采样率 %.0f Hz 与配置的 %d Hz 不同，将尝试配置的采样率",
+				r.targetDevice.DefaultSampleRate, r.config.CaptureSampleRate)
+		}
+	}
+
+	// 配置音频流参数
 	params := portaudio.StreamParameters{
 		Input: portaudio.StreamDeviceParameters{
 			Device:   r.targetDevice,
 			Channels: r.config.Channels,
 			Latency:  r.targetDevice.DefaultLowInputLatency,
 		},
-		SampleRate:      float64(r.config.CaptureSampleRate),
+		SampleRate:      float64(actualSampleRate),
 		FramesPerBuffer: 1024,
 	}
 
 	var err error
 	r.stream, err = portaudio.OpenStream(params, r.audioCallback)
 	if err != nil {
-		return fmt.Errorf("打开音频流失败: %v", err)
+		// 如果打开失败，尝试使用设备的默认采样率
+		if actualSampleRate != int(r.targetDevice.DefaultSampleRate) && r.targetDevice.DefaultSampleRate > 0 {
+			log.Printf("使用采样率 %d Hz 打开流失败: %v", actualSampleRate, err)
+			actualSampleRate = int(r.targetDevice.DefaultSampleRate)
+			log.Printf("尝试使用设备默认采样率: %d Hz", actualSampleRate)
+
+			// 更新采样率并重试
+			params.SampleRate = float64(actualSampleRate)
+			r.stream, err = portaudio.OpenStream(params, r.audioCallback)
+			if err == nil {
+				// 成功了，更新配置中的捕获采样率
+				r.config.CaptureSampleRate = actualSampleRate
+				log.Printf("成功使用默认采样率 %d Hz 打开音频流", actualSampleRate)
+			}
+		}
+
+		if err != nil {
+			return fmt.Errorf("打开音频流失败: %v", err)
+		}
 	}
 
 	if err := r.stream.Start(); err != nil {
