@@ -193,9 +193,6 @@ func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
 			}
 		} else {
 			err = app.wsClient.SendAudioStream(requestID, wavData)
-			if err == nil && app.enableDebug {
-				log.Printf("发送WAV音频数据块: %d 字节", len(wavData))
-			}
 		}
 
 		if err != nil {
@@ -252,9 +249,19 @@ func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteRes
 
 // HandleOutputTextStream 处理输出文本流
 func (app *App) HandleOutputTextStream(resp *websocket.OutputTextStreamResponse) {
-	if app.enableDebug {
-		log.Printf("收到文本流: ID=%s, 角色=%s, 文本=%s",
+	if app.enableDebug && len(resp.Data.Text) > 0 {
+		log.Printf("收到有效文本流: ID=%s, 角色=%s, 文本=%s",
 			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+	}
+
+	// 如果是用户消息且文本长度>=2，说明用户发送了新消息，执行打断逻辑
+	if resp.Data.Role == "user" && len(resp.Data.Text) >= 2 {
+		if app.player.IsPlaying() {
+			if app.enableDebug {
+				log.Println("检测到用户新消息，执行打断逻辑")
+			}
+			app.player.StopPlayback()
+		}
 	}
 }
 
@@ -263,16 +270,6 @@ func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteRespo
 	if app.enableDebug {
 		log.Printf("文本输出完成: ID=%s, 角色=%s, 文本=%s",
 			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
-	}
-
-	// 如果是用户消息完成且文本长度>=2，说明用户发送了新消息，执行打断逻辑
-	if resp.Data.Role == "user" && len(resp.Data.Text) >= 2 {
-		if app.player.IsPlaying() {
-			if app.enableDebug {
-				log.Println("检测到用户新消息，执行打断逻辑")
-			}
-			app.player.StopPlayback()
-		}
 	}
 }
 

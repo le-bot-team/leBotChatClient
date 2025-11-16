@@ -84,7 +84,7 @@ func DefaultConfig() *Config {
 			CaptureSampleRate: captureSampleRate,
 			Channels:          audioChannels,
 			BitDepth:          bitDepth,
-			BufferSize:        2 * outputSampleRate * audioChannels * bitDepth, // 2秒缓冲
+			BufferSize:        16 * outputSampleRate * audioChannels * bitDepth,
 			ChunkDuration:     chunkDuration,
 			ChunkSampleCount:  chunkSampleCount,
 			ChunkByteSize:     chunkByteSize,
