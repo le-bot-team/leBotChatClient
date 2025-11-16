@@ -29,17 +29,21 @@ type Player struct {
 	// 上下文控制
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// 调试模式
+	enableDebug bool
 }
 
 // NewPlayer 创建新的音频播放器
-func NewPlayer(cfg *config.AudioConfig) *Player {
+func NewPlayer(cfg *config.AudioConfig, enableDebug bool) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Player{
 		config:      cfg,
-		audioBuffer: buffer.New(cfg.BufferSize * 3), // 30秒总缓冲
+		audioBuffer: buffer.New(cfg.BufferSize),
 		ctx:         ctx,
 		cancel:      cancel,
+		enableDebug: enableDebug,
 	}
 }
 
@@ -68,12 +72,16 @@ func (p *Player) Stop() error {
 // WriteAudioData 写入音频数据
 func (p *Player) WriteAudioData(audioData []byte) {
 	written := p.audioBuffer.Write(audioData)
-	log.Printf("写入缓冲区: %d 字节, 当前缓冲: %d 字节", written, p.audioBuffer.Length())
+	if p.enableDebug {
+		log.Printf("写入缓冲区: %d 字节, 当前缓冲: %d 字节", written, p.audioBuffer.Length())
+	}
 
 	// 如果当前没有在播放，启动播放
 	p.mutex.Lock()
 	if !p.isPlaying {
-		log.Println("开始播放...")
+		if p.enableDebug {
+			log.Println("开始播放...")
+		}
 		p.isPlaying = true
 		go p.playAudio()
 	}
@@ -86,7 +94,7 @@ func (p *Player) SetAudioComplete(complete bool) {
 	p.audioComplete = complete
 	p.completeMutex.Unlock()
 
-	if complete {
+	if complete && p.enableDebug {
 		log.Println("收到播放完成指令")
 	}
 }
@@ -94,14 +102,18 @@ func (p *Player) SetAudioComplete(complete bool) {
 // ClearBuffer 清除音频缓冲区
 func (p *Player) ClearBuffer() {
 	p.audioBuffer.Clear()
-	log.Println("已清除音频缓冲区")
+	if p.enableDebug {
+		log.Println("已清除音频缓冲区")
+	}
 }
 
 // StopPlayback 立即停止播放（用于打断）
 func (p *Player) StopPlayback() {
 	p.mutex.Lock()
 	if p.stream != nil && p.isPlaying {
-		log.Println("打断播放，停止音频流...")
+		if p.enableDebug {
+			log.Println("打断播放，停止音频流...")
+		}
 		// 设置标志但不直接关闭 stream，让 playAudio 自然退出
 		p.isPlaying = false
 	}
@@ -144,7 +156,9 @@ func (p *Player) playAudio() {
 		}
 		p.mutex.Unlock()
 
-		log.Println("播放结束")
+		if p.enableDebug {
+			log.Println("播放结束")
+		}
 	}()
 
 	// 播放状态控制

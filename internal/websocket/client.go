@@ -37,10 +37,13 @@ type Client struct {
 
 	// 重连控制
 	reconnectChan chan struct{}
+
+	// 调试模式
+	enableDebug bool
 }
 
 // NewClient 创建新的WebSocket客户端
-func NewClient(cfg *config.WebSocketConfig, handler MessageHandler) *Client {
+func NewClient(cfg *config.WebSocketConfig, handler MessageHandler, enableDebug bool) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Client{
@@ -49,6 +52,7 @@ func NewClient(cfg *config.WebSocketConfig, handler MessageHandler) *Client {
 		ctx:           ctx,
 		cancel:        cancel,
 		reconnectChan: make(chan struct{}, 1),
+		enableDebug:   enableDebug,
 	}
 }
 
@@ -209,7 +213,9 @@ func (c *Client) connect() error {
 	c.conn = conn
 	c.mutex.Unlock()
 
-	log.Println("WebSocket连接成功")
+	if c.enableDebug {
+		log.Println("WebSocket连接成功")
+	}
 	return nil
 }
 
@@ -222,7 +228,9 @@ func (c *Client) messageLoop() {
 			c.conn = nil
 		}
 		c.mutex.Unlock()
-		log.Println("WebSocket连接已断开")
+		if c.enableDebug {
+			log.Println("WebSocket连接已断开")
+		}
 	}()
 
 	// 启动ping协程

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -74,4 +75,125 @@ func ConvertSamplesToWAV(audioSamples []int16, sampleRate int, channels int, bit
 	wavData = append(wavData, pcmData...)
 
 	return wavData
+}
+
+// ResampleAudio resamples audio from one sample rate to another using linear interpolation
+// This is a simple but effective resampling method suitable for speech audio
+func ResampleAudio(input []int16, fromRate, toRate int) []int16 {
+	if fromRate == toRate {
+		return input
+	}
+
+	// Calculate output length
+	ratio := float64(fromRate) / float64(toRate)
+	outputLength := int(float64(len(input)) / ratio)
+	output := make([]int16, outputLength)
+
+	for i := 0; i < outputLength; i++ {
+		// Calculate source position
+		srcPos := float64(i) * ratio
+		srcIdx := int(srcPos)
+
+		// Boundary check
+		if srcIdx >= len(input)-1 {
+			output[i] = input[len(input)-1]
+			continue
+		}
+
+		// Linear interpolation between two samples
+		fraction := srcPos - float64(srcIdx)
+		sample1 := float64(input[srcIdx])
+		sample2 := float64(input[srcIdx+1])
+		interpolated := sample1 + (sample2-sample1)*fraction
+
+		output[i] = int16(interpolated)
+	}
+
+	return output
+}
+
+// AudioStats 音频统计信息
+type AudioStats struct {
+	RMS           float64 // 均方根值
+	Peak          int16   // 峰值
+	SilentSamples int     // 静音采样点数
+	TotalSamples  int     // 总采样点数
+	SilenceRatio  float64 // 静音比例
+}
+
+// CalculateRMS 计算音频的RMS（均方根）值
+func CalculateRMS(samples []int16) float64 {
+	if len(samples) == 0 {
+		return 0
+	}
+
+	var sum float64
+	for _, sample := range samples {
+		val := float64(sample)
+		sum += val * val
+	}
+
+	return math.Sqrt(sum / float64(len(samples)))
+}
+
+// CalculateAudioStats 计算音频统计信息
+func CalculateAudioStats(samples []int16, silenceThreshold int16) AudioStats {
+	stats := AudioStats{
+		TotalSamples: len(samples),
+	}
+
+	if len(samples) == 0 {
+		return stats
+	}
+
+	// 计算RMS和峰值
+	var sum float64
+	var peak int16
+	silentCount := 0
+
+	for _, sample := range samples {
+		val := float64(sample)
+		sum += val * val
+
+		abs := sample
+		if abs < 0 {
+			abs = -abs
+		}
+		if abs > peak {
+			peak = abs
+		}
+
+		if abs <= silenceThreshold {
+			silentCount++
+		}
+	}
+
+	stats.RMS = math.Sqrt(sum / float64(len(samples)))
+	stats.Peak = peak
+	stats.SilentSamples = silentCount
+	stats.SilenceRatio = float64(silentCount) / float64(len(samples))
+
+	return stats
+}
+
+// IsSilent 判断音频是否为静音
+// rmsThreshold: RMS阈值，通常100-500之间
+// silenceRatioThreshold: 静音比例阈值，0-1之间
+func IsSilent(samples []int16, rmsThreshold float64, silenceRatioThreshold float64) bool {
+	if len(samples) == 0 {
+		return true
+	}
+
+	rms := CalculateRMS(samples)
+
+	// 如果RMS低于阈值，认为是静音
+	if rms < rmsThreshold {
+		return true
+	}
+
+	// 检查静音比例
+	silenceThreshold := int16(rmsThreshold * 0.5) // 使用RMS阈值的一半作为采样点静音阈值
+	stats := CalculateAudioStats(samples, silenceThreshold)
+
+	return stats.SilenceRatio > silenceRatioThreshold
 }

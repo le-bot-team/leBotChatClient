@@ -27,7 +27,8 @@ type App struct {
 	stdinMonitor *control.StdinMonitor
 
 	// 状态管理
-	updateFlag int32 // 更新响应标志位
+	updateFlag  int32 // 更新响应标志位
+	enableDebug bool  // 调试模式开关
 
 	// 上下文控制
 	ctx    context.Context
@@ -41,15 +42,16 @@ func NewApp() *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := &App{
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		config:      cfg,
+		ctx:         ctx,
+		cancel:      cancel,
+		enableDebug: cfg.EnableDebug,
 	}
 
 	// 初始化各组件
-	app.recorder = audio.NewRecorder(&cfg.Audio, app)
-	app.player = audio.NewPlayer(&cfg.Audio)
-	app.wsClient = websocket.NewClient(&cfg.WebSocket, app)
+	app.recorder = audio.NewRecorder(&cfg.Audio, app, cfg.EnableDebug)
+	app.player = audio.NewPlayer(&cfg.Audio, cfg.EnableDebug)
+	app.wsClient = websocket.NewClient(&cfg.WebSocket, app, cfg.EnableDebug)
 
 	// 根据配置选择控制方式
 	if cfg.Control.UseStdin {
@@ -186,12 +188,12 @@ func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
 		var err error
 		if isLast {
 			err = app.wsClient.SendAudioComplete(requestID, wavData)
-			if err == nil {
+			if err == nil && app.enableDebug {
 				log.Printf("发送完成请求(包含最后%d字节WAV音频)", len(wavData))
 			}
 		} else {
 			err = app.wsClient.SendAudioStream(requestID, wavData)
-			if err == nil {
+			if err == nil && app.enableDebug {
 				log.Printf("发送WAV音频数据块: %d 字节", len(wavData))
 			}
 		}
@@ -210,7 +212,7 @@ func (app *App) OnRecordingComplete(requestID string, _ []int16) {
 
 		if err := app.wsClient.SendAudioComplete(requestID, nil); err != nil {
 			log.Printf("发送完成通知失败: %v", err)
-		} else {
+		} else if app.enableDebug {
 			log.Println("发送完成请求(无剩余音频)")
 		}
 	}()
@@ -220,8 +222,10 @@ func (app *App) OnRecordingComplete(requestID string, _ []int16) {
 
 // HandleOutputAudioStream 处理输出音频流
 func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamResponse) {
-	log.Printf("收到音频流响应: ID=%s, 会话ID=%s, 对话ID=%s",
-		resp.ID, resp.Data.ConversationId, resp.Data.ChatId)
+	if app.enableDebug {
+		log.Printf("收到音频流响应: ID=%s, 会话ID=%s, 对话ID=%s",
+			resp.ID, resp.Data.ConversationId, resp.Data.ChatId)
+	}
 
 	audioData, err := base64.StdEncoding.DecodeString(resp.Data.Buffer)
 	if err != nil {
@@ -229,7 +233,9 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 		return
 	}
 
-	log.Printf("音频数据大小: %d 字节", len(audioData))
+	if app.enableDebug {
+		log.Printf("音频数据大小: %d 字节", len(audioData))
+	}
 
 	// 写入播放缓冲区
 	app.player.WriteAudioData(audioData)
@@ -237,26 +243,34 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 
 // HandleOutputAudioComplete 处理输出音频完成
 func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteResponse) {
-	log.Printf("音频输出完成: 会话ID=%s, 对话ID=%s",
-		resp.Data.ConversationId, resp.Data.ChatId)
+	if app.enableDebug {
+		log.Printf("音频输出完成: 会话ID=%s, 对话ID=%s",
+			resp.Data.ConversationId, resp.Data.ChatId)
+	}
 	app.player.SetAudioComplete(true)
 }
 
 // HandleOutputTextStream 处理输出文本流
 func (app *App) HandleOutputTextStream(resp *websocket.OutputTextStreamResponse) {
-	log.Printf("收到文本流: ID=%s, 角色=%s, 文本=%s",
-		resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+	if app.enableDebug {
+		log.Printf("收到文本流: ID=%s, 角色=%s, 文本=%s",
+			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+	}
 }
 
 // HandleOutputTextComplete 处理输出文本完成
 func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteResponse) {
-	log.Printf("文本输出完成: ID=%s, 角色=%s, 文本=%s",
-		resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+	if app.enableDebug {
+		log.Printf("文本输出完成: ID=%s, 角色=%s, 文本=%s",
+			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+	}
 
 	// 如果是用户消息完成且文本长度>=2，说明用户发送了新消息，执行打断逻辑
 	if resp.Data.Role == "user" && len(resp.Data.Text) >= 2 {
 		if app.player.IsPlaying() {
-			log.Println("检测到用户新消息，执行打断逻辑")
+			if app.enableDebug {
+				log.Println("检测到用户新消息，执行打断逻辑")
+			}
 			app.player.StopPlayback()
 		}
 	}
@@ -264,8 +278,10 @@ func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteRespo
 
 // HandleChatComplete 处理聊天完成
 func (app *App) HandleChatComplete(resp *websocket.ChatCompleteResponse) {
-	log.Printf("聊天完成: ID=%s, 成功=%v, 消息=%s",
-		resp.Data.ChatId, resp.Success, resp.Message)
+	if app.enableDebug {
+		log.Printf("聊天完成: ID=%s, 成功=%v, 消息=%s",
+			resp.Data.ChatId, resp.Success, resp.Message)
+	}
 
 	if !resp.Success {
 		for _, err := range resp.Data.Errors {
@@ -276,7 +292,9 @@ func (app *App) HandleChatComplete(resp *websocket.ChatCompleteResponse) {
 
 // HandleUpdateConfig 处理更新配置响应
 func (app *App) HandleUpdateConfig(resp *websocket.UpdateConfigResponse) {
-	log.Printf("收到配置更新响应: Success=%v, Message=%s", resp.Success, resp.Message)
+	if app.enableDebug {
+		log.Printf("收到配置更新响应: Success=%v, Message=%s", resp.Success, resp.Message)
+	}
 	atomic.StoreInt32(&app.updateFlag, 1)
 }
 
@@ -287,7 +305,9 @@ func (app *App) sendUpdateConfigAndWait(requestID string) {
 		return
 	}
 
-	log.Println("更新请求已发送")
+	if app.enableDebug {
+		log.Println("更新请求已发送")
+	}
 
 	// 等待标志位更新
 	for atomic.LoadInt32(&app.updateFlag) == 0 {
@@ -300,5 +320,7 @@ func (app *App) sendUpdateConfigAndWait(requestID string) {
 	}
 
 	atomic.StoreInt32(&app.updateFlag, 0)
-	log.Println("更新响应成功，开始流式录音发送")
+	if app.enableDebug {
+		log.Println("更新响应成功，开始流式录音发送")
+	}
 }
