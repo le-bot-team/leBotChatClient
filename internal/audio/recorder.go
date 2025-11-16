@@ -120,37 +120,58 @@ func (r *Recorder) findAudioDevice() error {
 		devNameLower := strings.ToLower(dev.Name)
 		priority := 0
 
-		// 优先级1: 明确的麦克风设备
-		if strings.Contains(devNameLower, "microphone") ||
-			strings.Contains(devNameLower, "mic") {
-			priority = 100
+		// 优先级1: PulseAudio/PipeWire（桌面环境最佳选择）
+		if strings.Contains(devNameLower, "pulse") {
+			priority = 200
+		} else if strings.Contains(devNameLower, "pipewire") {
+			priority = 190
 		}
 
-		// 优先级2: 数字麦克风(通常质量较好)
+		// 优先级2: 明确的麦克风设备
+		if strings.Contains(devNameLower, "microphone") ||
+			strings.Contains(devNameLower, "mic") {
+			priority += 100
+		}
+
+		// 优先级3: 数字麦克风(通常质量较好)
 		if strings.Contains(devNameLower, "digital") {
 			priority += 50
 		}
 
-		// 优先级3: sof-hda-dsp 设备
+		// 优先级4: sof-hda-dsp 设备
 		if strings.Contains(devNameLower, "sof-hda-dsp") {
 			priority += 40
 		}
 
-		// 优先级4: 嵌入式特定设备
+		// 优先级5: 嵌入式特定设备
 		if strings.Contains(devNameLower, "audiocodec") ||
 			strings.Contains(dev.Name, "hw:0,0") {
 			priority += 30
 		}
 
+		// 优先级6: default设备（通常是可靠的选择）
+		if devNameLower == "default" {
+			priority = 150
+		}
+
 		// 排除不需要的设备
 		if strings.Contains(devNameLower, "monitor") ||
-			strings.Contains(devNameLower, "loopback") {
+			strings.Contains(devNameLower, "loopback") ||
+			strings.Contains(devNameLower, "sysdefault") ||
+			strings.Contains(devNameLower, "lavrate") ||
+			strings.Contains(devNameLower, "samplerate") ||
+			strings.Contains(devNameLower, "speexrate") ||
+			strings.Contains(devNameLower, "upmix") ||
+			strings.Contains(devNameLower, "vdownmix") {
 			continue
 		}
 
 		if priority > 0 {
 			candidates = append(candidates, dev)
 			priorities = append(priorities, priority)
+			if r.enableDebug {
+				log.Printf("  候选设备: %s (优先级: %d)", dev.Name, priority)
+			}
 		}
 	}
 
