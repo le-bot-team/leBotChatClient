@@ -62,23 +62,27 @@ func NewRecorder(cfg *config.AudioConfig, handler AudioHandler, enableDebug bool
 
 // Initialize 初始化音频设备
 func (r *Recorder) Initialize() error {
-	if r.isPortAudioInit {
+	if r.deviceInitialized {
+		if r.enableDebug {
+			log.Println("音频设备已初始化，跳过重复初始化")
+		}
 		return nil
 	}
 
 	// 初始化PortAudio
-	if err := portaudio.Initialize(); err != nil {
-		return fmt.Errorf("PortAudio初始化失败: %v", err)
+	if !r.isPortAudioInit {
+		if err := portaudio.Initialize(); err != nil {
+			return fmt.Errorf("PortAudio初始化失败: %v", err)
+		}
+		r.isPortAudioInit = true
 	}
-	r.isPortAudioInit = true
 
 	// 查找音频设备
 	if err := r.findAudioDevice(); err != nil {
-		err := portaudio.Terminate()
-		if err != nil {
-			return err
+		if r.isPortAudioInit {
+			portaudio.Terminate()
+			r.isPortAudioInit = false
 		}
-		r.isPortAudioInit = false
 		return err
 	}
 
@@ -88,18 +92,21 @@ func (r *Recorder) Initialize() error {
 
 // findAudioDevice 查找合适的音频输入设备
 func (r *Recorder) findAudioDevice() error {
-	host, err := portaudio.DefaultHostApi()
+	// 先尝试获取所有可用设备（不依赖Host API）
+	devices, err := portaudio.Devices()
 	if err != nil {
-		return fmt.Errorf("获取Host API失败: %v", err)
+		return fmt.Errorf("获取设备列表失败: %v", err)
 	}
-	if host == nil {
-		return fmt.Errorf("获取Host API返回nil")
+
+	if r.enableDebug {
+		log.Printf("PortAudio 版本: %s", portaudio.VersionText())
+		log.Printf("找到 %d 个音频设备", len(devices))
 	}
 
 	// 在debug模式下列出所有可用设备
 	if r.enableDebug {
 		log.Println("=== 可用的音频输入设备 ===")
-		for i, dev := range host.Devices {
+		for i, dev := range devices {
 			if dev.MaxInputChannels > 0 {
 				log.Printf("[%d] %s (输入通道: %d, 采样率: %.0f Hz)",
 					i, dev.Name, dev.MaxInputChannels, dev.DefaultSampleRate)
@@ -108,11 +115,15 @@ func (r *Recorder) findAudioDevice() error {
 		log.Println("=========================")
 	}
 
+	if len(devices) == 0 {
+		return fmt.Errorf("未找到任何音频设备")
+	}
+
 	// 优先级匹配逻辑（按优先级从高到低）
 	var candidates []*portaudio.DeviceInfo
 	var priorities []int
 
-	for _, dev := range host.Devices {
+	for _, dev := range devices {
 		if dev.MaxInputChannels < r.config.Channels {
 			continue
 		}

@@ -90,8 +90,8 @@ func DefaultConfig() *Config {
 			ChunkByteSize:     chunkByteSize,
 		},
 		WebSocket: WebSocketConfig{
-			URL: "wss://cafuuchino.studio26f.org:10543/api/v1/chat/ws?token=019a8a46-4cc6-7000-9a15-91bd868ece0d",
-			//URL: "ws://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=019a667c-1231-7000-a662-08221ad75f4a",
+			// URL: "wss://cafuuchino.studio26f.org:10543/api/v1/chat/ws?token=019adea1-3290-7000-8567-448dd6ff7c6f",
+			URL:            "ws://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=019adea1-3290-7000-8567-448dd6ff7c6f",
 			ReconnectDelay: 5 * time.Second,
 			PingInterval:   30 * time.Second,
 			WriteTimeout:   10 * time.Second,

@@ -23,9 +23,9 @@ export GOARM=7
 
 # CGO 编译器和链接器标志
 # 添加工具链的 include 和 lib 路径
-# 注意：明确指定 portaudio 的链接参数，避免使用 ALSA
+# PortAudio 使用 ALSA 后端，需要链接 ALSA 库及其依赖
 export CGO_CFLAGS="-I${TOOLCHAIN_DIR}/include"
-export CGO_LDFLAGS="-L${TOOLCHAIN_DIR}/lib -L${TOOLCHAIN_DIR}/arm-openwrt-linux-muslgnueabi/lib -lportaudio -lm -lpthread"
+export CGO_LDFLAGS="-L${TOOLCHAIN_DIR}/lib -L${TOOLCHAIN_DIR}/arm-openwrt-linux-muslgnueabi/lib -lportaudio -lasound -lm -lpthread -ldl -lrt"
 
 # 配置 pkg-config 使用工具链的库（仅使用工具链，不使用系统库）
 export PKG_CONFIG_PATH="${TOOLCHAIN_DIR}/lib/pkgconfig"
