@@ -103,20 +103,27 @@ func (r *Recorder) findAudioDevice() error {
 		log.Printf("找到 %d 个音频设备", len(devices))
 	}
 
-	// 在debug模式下列出所有可用设备
+	// 在debug模式下列出所有可用设备（包括不可用的，用于调试）
 	if r.enableDebug {
-		log.Println("=== 可用的音频输入设备 ===")
+		log.Println("=== 所有音频设备（包括输出设备）===")
 		for i, dev := range devices {
-			if dev.MaxInputChannels > 0 {
-				log.Printf("[%d] %s (输入通道: %d, 采样率: %.0f Hz)",
-					i, dev.Name, dev.MaxInputChannels, dev.DefaultSampleRate)
-			}
+			log.Printf("[%d] %s (输入通道: %d, 输出通道: %d, 采样率: %.0f Hz)",
+				i, dev.Name, dev.MaxInputChannels, dev.MaxOutputChannels, dev.DefaultSampleRate)
 		}
-		log.Println("=========================")
+		log.Println("=====================================")
 	}
 
 	if len(devices) == 0 {
-		return fmt.Errorf("未找到任何音频设备")
+		// 在嵌入式环境中，可能需要更多时间初始化
+		log.Println("警告：未找到任何音频设备，尝试使用默认设备...")
+		// 尝试获取默认输入设备
+		defDev, defErr := portaudio.DefaultInputDevice()
+		if defErr == nil && defDev != nil {
+			r.targetDevice = defDev
+			log.Printf("使用默认输入设备: %s", defDev.Name)
+			return nil
+		}
+		return fmt.Errorf("未找到任何音频设备（包括默认设备）")
 	}
 
 	// 优先级匹配逻辑（按优先级从高到低）
@@ -124,8 +131,17 @@ func (r *Recorder) findAudioDevice() error {
 	var priorities []int
 
 	for _, dev := range devices {
-		if dev.MaxInputChannels < r.config.Channels {
+		// 必须有输入通道
+		if dev.MaxInputChannels == 0 {
 			continue
+		}
+
+		// 在嵌入式环境中，即使通道数不匹配也考虑（可能是单声道转换）
+		if dev.MaxInputChannels < r.config.Channels && r.config.Channels > 1 {
+			if r.enableDebug {
+				log.Printf("  设备 %s 通道数不足 (%d < %d), 但可能支持转换",
+					dev.Name, dev.MaxInputChannels, r.config.Channels)
+			}
 		}
 
 		devNameLower := strings.ToLower(dev.Name)
@@ -154,15 +170,23 @@ func (r *Recorder) findAudioDevice() error {
 			priority += 40
 		}
 
-		// 优先级5: 嵌入式特定设备
+		// 优先级5: 嵌入式特定设备（OpenWRT/嵌入式Linux常见）
 		if strings.Contains(devNameLower, "audiocodec") ||
-			strings.Contains(dev.Name, "hw:0,0") {
+			strings.Contains(devNameLower, "sunxi-codec") ||
+			strings.Contains(devNameLower, "allwinner") ||
+			strings.Contains(dev.Name, "hw:0,0") ||
+			strings.Contains(dev.Name, "plughw:0,0") {
 			priority += 30
 		}
 
 		// 优先级6: default设备（通常是可靠的选择）
 		if devNameLower == "default" {
 			priority = 150
+		}
+
+		// 优先级7: plughw设备（有插件支持，更灵活）
+		if strings.Contains(devNameLower, "plughw") {
+			priority += 25
 		}
 
 		// 排除不需要的设备
@@ -175,6 +199,14 @@ func (r *Recorder) findAudioDevice() error {
 			strings.Contains(devNameLower, "upmix") ||
 			strings.Contains(devNameLower, "vdownmix") {
 			continue
+		}
+
+		// 即使优先级为0，只要有输入通道也加入候选（嵌入式环境可能设备名不标准）
+		if priority == 0 && dev.MaxInputChannels > 0 {
+			priority = 10 // 给一个基础优先级
+			if r.enableDebug {
+				log.Printf("  未识别的输入设备: %s (给予基础优先级)", dev.Name)
+			}
 		}
 
 		if priority > 0 {
