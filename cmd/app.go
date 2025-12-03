@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -172,6 +173,26 @@ func (app *App) HandleCommand(cmd control.Command) {
 		} else {
 			log.Println("未在录音状态，忽略停止命令")
 		}
+
+	case control.CmdTestRecording:
+		if app.recorder.IsRecording() {
+			log.Println("正在录音中，无法开始测试录音")
+			return
+		}
+
+		// 异步执行测试录音
+		app.wg.Add(1)
+		go func() {
+			defer app.wg.Done()
+
+			// 生成带时间戳的文件名
+			filename := fmt.Sprintf("test_recording_%s.wav", time.Now().Format("20060102_150405"))
+
+			// 录制5秒
+			if err := app.recorder.TestRecording(5, filename); err != nil {
+				log.Printf("测试录音失败: %v", err)
+			}
+		}()
 	}
 }
 

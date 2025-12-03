@@ -63,11 +63,12 @@ if ! find ${TOOLCHAIN_DIR} -name "libportaudio*" | grep -q .; then
     exit 1
 fi
 
-# 创建输出目录
-mkdir -p ./build
-
 # 编译
 echo ""
+echo "清理旧的编译缓存..."
+go clean -cache -modcache
+echo "删除旧的构建目录..."
+rm -rf ./build/ && mkdir -p ./build/
 echo "开始编译..."
 go build -ldflags="-s -w" -o ./build/chat_client_openwrt ./cmd
 

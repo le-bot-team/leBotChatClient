@@ -16,6 +16,7 @@ type Command string
 const (
 	CmdStartRecording Command = "1" // 开始录音
 	CmdStopRecording  Command = "2" // 停止录音
+	CmdTestRecording  Command = "3" // 测试录音
 )
 
 // Handler 控制命令处理器接口

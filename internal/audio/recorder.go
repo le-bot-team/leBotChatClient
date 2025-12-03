@@ -3,9 +3,11 @@ package audio
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"strings"
 	"sync"
+	"time"
 	"websocket_client_chat/internal/config"
 	"websocket_client_chat/pkg/utils"
 
@@ -464,11 +466,16 @@ func (r *Recorder) audioCallback(in []int16) {
 			// 音频诊断（仅在debug模式下）
 			if r.enableDebug {
 				rms := utils.CalculateRMS(chunk)
-				stats := utils.CalculateAudioStats(chunk, 100)
+				// 使用自适应阈值：基于RMS的50%作为采样点静音阈值
+				sampleThreshold := int16(rms * 0.5)
+				if sampleThreshold < 100 {
+					sampleThreshold = 100
+				}
+				stats := utils.CalculateAudioStats(chunk, sampleThreshold)
 				isSilent := utils.IsSilent(chunk, 200.0, 0.95)
 
-				log.Printf("音频诊断 - RMS: %.2f, Peak: %d, 静音比例: %.2f%%, 是否静音: %v",
-					rms, stats.Peak, stats.SilenceRatio*100, isSilent)
+				log.Printf("音频诊断 - RMS: %.2f, Peak: %d, 静音比例: %.2f%%, 阈值: %d, 是否静音: %v",
+					rms, stats.Peak, stats.SilenceRatio*100, sampleThreshold, isSilent)
 			}
 
 			requestID := r.streamingRequestID
@@ -491,4 +498,95 @@ func (r *Recorder) ConvertToWAV(samples []int16) []byte {
 		r.config.Channels,
 		r.config.BitDepth,
 	)
+}
+
+// TestRecording 测试录音功能，录制指定时长并保存到文件
+func (r *Recorder) TestRecording(duration int, filename string) error {
+	// 检查是否已在录音
+	if r.IsRecording() {
+		return fmt.Errorf("正在录音中，无法开始测试录音")
+	}
+
+	log.Printf("开始测试录音，时长: %d秒，保存到: %s", duration, filename)
+
+	// 初始化音频设备
+	if err := r.Initialize(); err != nil {
+		return fmt.Errorf("初始化音频设备失败: %v", err)
+	}
+
+	// 创建音频流参数
+	streamParams := portaudio.StreamParameters{
+		Input: portaudio.StreamDeviceParameters{
+			Device:   r.targetDevice,
+			Channels: r.config.Channels,
+			Latency:  r.targetDevice.DefaultLowInputLatency,
+		},
+		SampleRate:      float64(r.config.CaptureSampleRate),
+		FramesPerBuffer: 1024,
+	}
+
+	// 准备缓冲区
+	testBuffer := make([]int16, 0)
+	var testMutex sync.Mutex
+
+	// 创建音频流
+	stream, err := portaudio.OpenStream(streamParams, func(in []int16) {
+		testMutex.Lock()
+		testBuffer = append(testBuffer, in...)
+		testMutex.Unlock()
+	})
+	if err != nil {
+		return fmt.Errorf("打开音频流失败: %v", err)
+	}
+	defer stream.Close()
+
+	// 开始录音
+	if err := stream.Start(); err != nil {
+		return fmt.Errorf("开始音频流失败: %v", err)
+	}
+
+	log.Printf("录音中...")
+
+	// 等待指定时长
+	time.Sleep(time.Duration(duration) * time.Second)
+
+	// 停止录音
+	if err := stream.Stop(); err != nil {
+		log.Printf("停止音频流警告: %v", err)
+	}
+
+	// 获取录制的数据
+	testMutex.Lock()
+	recordedSamples := make([]int16, len(testBuffer))
+	copy(recordedSamples, testBuffer)
+	testMutex.Unlock()
+
+	log.Printf("录音完成，采样点数: %d", len(recordedSamples))
+
+	// 重采样（如果需要）
+	if r.config.CaptureSampleRate != r.config.SampleRate {
+		log.Printf("重采样: %d Hz -> %d Hz", r.config.CaptureSampleRate, r.config.SampleRate)
+		recordedSamples = utils.ResampleAudio(recordedSamples, r.config.CaptureSampleRate, r.config.SampleRate)
+		log.Printf("重采样后采样点数: %d", len(recordedSamples))
+	}
+
+	// 音频统计
+	if r.enableDebug {
+		rms := utils.CalculateRMS(recordedSamples)
+		stats := utils.CalculateAudioStats(recordedSamples, 100)
+		log.Printf("音频统计 - RMS: %.2f, Peak: %d, 静音比例: %.2f%%",
+			rms, stats.Peak, stats.SilenceRatio*100)
+	}
+
+	// 转换为WAV格式
+	wavData := r.ConvertToWAV(recordedSamples)
+
+	// 保存到文件
+	if err := ioutil.WriteFile(filename, wavData, 0644); err != nil {
+		return fmt.Errorf("保存文件失败: %v", err)
+	}
+
+	log.Printf("测试录音完成，文件已保存: %s (%.2f KB)", filename, float64(len(wavData))/1024)
+
+	return nil
 }

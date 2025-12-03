@@ -52,8 +52,9 @@ func (sm *StdinMonitor) monitorLoop() {
 	fmt.Println("输入命令:")
 	fmt.Println("  1 或 start - 开始录音")
 	fmt.Println("  2 或 stop  - 停止录音并发送")
+	fmt.Println("  3 或 test  - 测试录音(录制5秒并保存到文件)")
 	fmt.Println("  q 或 quit  - 退出程序")
-	fmt.Println("==================\n")
+	fmt.Println("==================")
 
 	for {
 		select {
@@ -91,6 +92,9 @@ func (sm *StdinMonitor) processCommand(input string) {
 	case "2", "stop":
 		cmd = CmdStopRecording
 		log.Println("命令: 停止录音")
+	case "3", "test":
+		cmd = CmdTestRecording
+		log.Println("命令: 测试录音(将录制5秒并保存)")
 	case "q", "quit", "exit":
 		log.Println("命令: 退出程序")
 		// 触发程序退出
