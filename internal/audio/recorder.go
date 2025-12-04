@@ -26,9 +26,10 @@ type Recorder struct {
 	handler AudioHandler
 
 	// 音频设备状态
-	targetDevice      *portaudio.DeviceInfo
-	isPortAudioInit   bool
-	deviceInitialized bool
+	targetDevice            *portaudio.DeviceInfo
+	isPortAudioInit         bool
+	deviceInitialized       bool
+	actualCaptureSampleRate int // 实际使用的捕获采样率
 
 	// 录制状态
 	isRecording bool
@@ -54,11 +55,12 @@ func NewRecorder(cfg *config.AudioConfig, handler AudioHandler, enableDebug bool
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Recorder{
-		config:      cfg,
-		handler:     handler,
-		ctx:         ctx,
-		cancel:      cancel,
-		enableDebug: enableDebug,
+		config:                  cfg,
+		handler:                 handler,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		enableDebug:             enableDebug,
+		actualCaptureSampleRate: cfg.CaptureSampleRate,
 	}
 }
 
@@ -172,16 +174,21 @@ func (r *Recorder) findAudioDevice() error {
 			priority += 40
 		}
 
-		// 优先级5: 嵌入式特定设备（OpenWRT/嵌入式Linux常见）
+		// 优先级5: 嵌入式硬件设备（优先使用以避免延迟）
 		if strings.Contains(devNameLower, "audiocodec") ||
 			strings.Contains(devNameLower, "sunxi-codec") ||
 			strings.Contains(devNameLower, "allwinner") ||
 			strings.Contains(dev.Name, "hw:0,0") ||
 			strings.Contains(dev.Name, "plughw:0,0") {
-			priority += 30
+			priority += 180
 		}
 
-		// 优先级6: default设备（通常是可靠的选择）
+		// 优先级6: Capture 设备（直接硬件录音，避免dsnoop延迟）
+		if strings.HasPrefix(devNameLower, "capture") && !strings.Contains(devNameLower, "dsnoop") {
+			priority += 170
+		}
+
+		// 优先级7: default设备（通用但可能有额外延迟）
 		if devNameLower == "default" {
 			priority = 150
 		}
@@ -300,14 +307,21 @@ func (r *Recorder) StartRecording(requestID string) error {
 	r.streamingMutex.Unlock()
 
 	// 确定实际使用的采样率
+	// 优先级：
+	// 1. 如果设备默认采样率 = 目标采样率，直接使用（无需重采样）
+	// 2. 否则使用配置的捕获采样率，失败后再使用设备默认
 	actualSampleRate := r.config.CaptureSampleRate
-
-	// 如果设备不支持配置的采样率，尝试使用设备的默认采样率
-	if r.targetDevice.DefaultSampleRate > 0 &&
-		r.targetDevice.DefaultSampleRate != float64(r.config.CaptureSampleRate) {
-		if r.enableDebug {
-			log.Printf("设备默认采样率 %.0f Hz 与配置的 %d Hz 不同，将尝试配置的采样率",
-				r.targetDevice.DefaultSampleRate, r.config.CaptureSampleRate)
+	if r.targetDevice.DefaultSampleRate > 0 {
+		deviceDefaultRate := int(r.targetDevice.DefaultSampleRate)
+		if deviceDefaultRate == r.config.SampleRate {
+			// 设备默认采样率就是目标采样率，直接使用，避免不必要的重采样
+			actualSampleRate = deviceDefaultRate
+			if r.enableDebug {
+				log.Printf("设备默认采样率 %d Hz 匹配目标采样率，直接使用（无需重采样）", actualSampleRate)
+			}
+		} else if r.enableDebug {
+			log.Printf("设备默认采样率 %d Hz 与配置的 %d Hz 不同，将尝试配置的采样率",
+				deviceDefaultRate, r.config.CaptureSampleRate)
 		}
 	}
 
@@ -327,24 +341,19 @@ func (r *Recorder) StartRecording(requestID string) error {
 	if err != nil {
 		// 如果打开失败，尝试使用设备的默认采样率
 		if actualSampleRate != int(r.targetDevice.DefaultSampleRate) && r.targetDevice.DefaultSampleRate > 0 {
-			log.Printf("使用采样率 %d Hz 打开流失败: %v", actualSampleRate, err)
+			log.Printf("使用采样率 %d Hz 失败: %v，尝试设备默认采样率 %d Hz",
+				actualSampleRate, err, int(r.targetDevice.DefaultSampleRate))
 			actualSampleRate = int(r.targetDevice.DefaultSampleRate)
-			log.Printf("尝试使用设备默认采样率: %d Hz", actualSampleRate)
-
-			// 更新采样率并重试
 			params.SampleRate = float64(actualSampleRate)
 			r.stream, err = portaudio.OpenStream(params, r.audioCallback)
-			if err == nil {
-				// 成功了，更新配置中的捕获采样率
-				r.config.CaptureSampleRate = actualSampleRate
-				log.Printf("成功使用默认采样率 %d Hz 打开音频流", actualSampleRate)
-			}
 		}
-
 		if err != nil {
 			return fmt.Errorf("打开音频流失败: %v", err)
 		}
 	}
+
+	// 记录实际使用的采样率
+	r.actualCaptureSampleRate = actualSampleRate
 
 	if err := r.stream.Start(); err != nil {
 		err := r.stream.Close()
@@ -357,8 +366,8 @@ func (r *Recorder) StartRecording(requestID string) error {
 
 	r.isRecording = true
 	if r.enableDebug {
-		log.Printf("开始录音 (设备: %s, 捕获采样率: %dHz, 输出采样率: %dHz)",
-			r.targetDevice.Name, r.config.CaptureSampleRate, r.config.SampleRate)
+		log.Printf("开始录音 (设备: %s, 实际捕获采样率: %dHz, 输出采样率: %dHz)",
+			r.targetDevice.Name, r.actualCaptureSampleRate, r.config.SampleRate)
 	}
 	return nil
 }
@@ -444,8 +453,8 @@ func (r *Recorder) audioCallback(in []int16) {
 	r.streamingMutex.Lock()
 	r.streamingBuffer = append(r.streamingBuffer, in...)
 
-	// 计算需要多少捕获样本才能生成一个输出chunk
-	captureChunkSize := int(float64(r.config.CaptureSampleRate) * r.config.ChunkDuration.Seconds())
+	// 计算需要多少捕获样本才能生成一个输出chunk（使用实际采样率）
+	captureChunkSize := int(float64(r.actualCaptureSampleRate) * r.config.ChunkDuration.Seconds())
 
 	// 当捕获缓冲区有足够数据时，进行重采样
 	for len(r.streamingBuffer) >= captureChunkSize {
@@ -453,8 +462,8 @@ func (r *Recorder) audioCallback(in []int16) {
 		captureChunk := r.streamingBuffer[:captureChunkSize]
 		r.streamingBuffer = r.streamingBuffer[captureChunkSize:]
 
-		// 重采样到目标采样率
-		resampled := utils.ResampleAudio(captureChunk, r.config.CaptureSampleRate, r.config.SampleRate)
+		// 重采样到目标采样率（使用实际采样率）
+		resampled := utils.ResampleAudio(captureChunk, r.actualCaptureSampleRate, r.config.SampleRate)
 		r.resampleBuffer = append(r.resampleBuffer, resampled...)
 
 		// 当重采样缓冲区达到输出chunk大小时发送
@@ -514,31 +523,55 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 		return fmt.Errorf("初始化音频设备失败: %v", err)
 	}
 
-	// 创建音频流参数
+	// 确定实际采样率（优先使用已记录的实际采样率）
+	actualSampleRate := r.config.CaptureSampleRate
+	if r.actualCaptureSampleRate > 0 {
+		actualSampleRate = r.actualCaptureSampleRate
+	} else if r.targetDevice.DefaultSampleRate > 0 {
+		deviceDefaultRate := int(r.targetDevice.DefaultSampleRate)
+		if deviceDefaultRate == r.config.SampleRate {
+			// 设备默认采样率匹配目标，直接使用
+			actualSampleRate = deviceDefaultRate
+		}
+	}
+
+	// 创建音频流参数（使用阻塞读取而不是回调）
 	streamParams := portaudio.StreamParameters{
 		Input: portaudio.StreamDeviceParameters{
 			Device:   r.targetDevice,
 			Channels: r.config.Channels,
 			Latency:  r.targetDevice.DefaultLowInputLatency,
 		},
-		SampleRate:      float64(r.config.CaptureSampleRate),
+		SampleRate:      float64(actualSampleRate),
 		FramesPerBuffer: 1024,
 	}
 
 	// 准备缓冲区
-	testBuffer := make([]int16, 0)
-	var testMutex sync.Mutex
+	bufferSize := actualSampleRate * duration * r.config.Channels
+	testBuffer := make([]int16, 0, bufferSize)
+	readBuffer := make([]int16, 1024*r.config.Channels) // 用于Read()的缓冲区
 
-	// 创建音频流
-	stream, err := portaudio.OpenStream(streamParams, func(in []int16) {
-		testMutex.Lock()
-		testBuffer = append(testBuffer, in...)
-		testMutex.Unlock()
-	})
+	// 创建音频流（使用阻塞读取）
+	stream, err := portaudio.OpenStream(streamParams, &readBuffer)
 	if err != nil {
-		return fmt.Errorf("打开音频流失败: %v", err)
+		// 尝试使用设备默认采样率
+		if r.targetDevice.DefaultSampleRate > 0 && actualSampleRate != int(r.targetDevice.DefaultSampleRate) {
+			log.Printf("使用采样率 %d Hz 失败: %v", actualSampleRate, err)
+			actualSampleRate = int(r.targetDevice.DefaultSampleRate)
+			log.Printf("尝试使用设备默认采样率: %d Hz", actualSampleRate)
+			streamParams.SampleRate = float64(actualSampleRate)
+			bufferSize = actualSampleRate * duration * r.config.Channels
+			testBuffer = make([]int16, 0, bufferSize)
+			stream, err = portaudio.OpenStream(streamParams, &readBuffer)
+		}
+		if err != nil {
+			return fmt.Errorf("打开音频流失败: %v", err)
+		}
 	}
 	defer stream.Close()
+
+	log.Printf("测试录音参数: 采样率=%d Hz, 声道=%d, 时长=%d秒",
+		actualSampleRate, r.config.Channels, duration)
 
 	// 开始录音
 	if err := stream.Start(); err != nil {
@@ -546,28 +579,78 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 	}
 
 	log.Printf("录音中...")
+	startTime := time.Now()
 
-	// 等待指定时长
-	time.Sleep(time.Duration(duration) * time.Second)
+	// 计算需要读取的次数
+	totalSamplesNeeded := actualSampleRate * duration
+	readsNeeded := (totalSamplesNeeded + len(readBuffer) - 1) / len(readBuffer) // 向上取整
+	totalRead := 0
+	readCount := 0
+
+	log.Printf("计划读取 %d 次，每次 %d 采样点，共需 %d 采样点",
+		readsNeeded, len(readBuffer), totalSamplesNeeded)
+
+	// 精确读取指定次数
+	successReads := 0
+	for readCount < readsNeeded {
+		readStartTime := time.Now()
+		err := stream.Read()
+		readDuration := time.Since(readStartTime)
+
+		if err != nil {
+			log.Printf("读取音频数据错误 (第 %d/%d 次，耗时 %.3f 秒): %v",
+				readCount+1, readsNeeded, readDuration.Seconds(), err)
+
+			// 如果连续失败太多次，退出
+			if readCount-successReads > 10 {
+				log.Printf("连续失败过多，停止读取")
+				break
+			}
+			readCount++
+			continue
+		}
+
+		// 成功读取
+		successReads++
+
+		// 复制数据到缓冲区
+		chunk := make([]int16, len(readBuffer))
+		copy(chunk, readBuffer)
+		testBuffer = append(testBuffer, chunk...)
+		totalRead += len(readBuffer)
+		readCount++
+
+		// 调试日志和性能检查
+		if r.enableDebug {
+			if readDuration > 150*time.Millisecond {
+				log.Printf("警告: 第 %d 次读取耗时 %.3f 秒（可能存在设备延迟）",
+					readCount, readDuration.Seconds())
+			}
+			if readCount%50 == 0 {
+				log.Printf("已读取 %d/%d 次，共 %d 采样点 (%.2f 秒)",
+					readCount, readsNeeded, totalRead, float64(totalRead)/float64(actualSampleRate))
+			}
+		}
+	}
+
+	actualDuration := time.Since(startTime)
+	log.Printf("录音实际时长: %.2f 秒，读取次数: %d/%d，采样点: %d/%d",
+		actualDuration.Seconds(), readCount, readsNeeded, totalRead, totalSamplesNeeded)
 
 	// 停止录音
 	if err := stream.Stop(); err != nil {
 		log.Printf("停止音频流警告: %v", err)
 	}
 
-	// 获取录制的数据
-	testMutex.Lock()
-	recordedSamples := make([]int16, len(testBuffer))
-	copy(recordedSamples, testBuffer)
-	testMutex.Unlock()
-
-	log.Printf("录音完成，采样点数: %d", len(recordedSamples))
+	recordedSamples := testBuffer
 
 	// 重采样（如果需要）
-	if r.config.CaptureSampleRate != r.config.SampleRate {
-		log.Printf("重采样: %d Hz -> %d Hz", r.config.CaptureSampleRate, r.config.SampleRate)
-		recordedSamples = utils.ResampleAudio(recordedSamples, r.config.CaptureSampleRate, r.config.SampleRate)
+	if actualSampleRate != r.config.SampleRate {
+		log.Printf("重采样: %d Hz -> %d Hz", actualSampleRate, r.config.SampleRate)
+		recordedSamples = utils.ResampleAudio(recordedSamples, actualSampleRate, r.config.SampleRate)
 		log.Printf("重采样后采样点数: %d", len(recordedSamples))
+	} else {
+		log.Printf("采样率匹配，无需重采样 (%d Hz)", actualSampleRate)
 	}
 
 	// 音频统计

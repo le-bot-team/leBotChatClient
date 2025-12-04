@@ -3,6 +3,42 @@
 ## Problem
 The application was configured to record audio at 16000 Hz, but the hardware audio system (PipeWire/PulseAudio) operates natively at 48000 Hz. This caused a `paInvalidSampleRate` error when trying to open the audio stream.
 
+## Latest Updates (2025-12-04)
+
+### Update 2: Critical Fix - Device Default Sample Rate Priority
+**Problem**: Even after tracking actual sample rate, embedded devices still produced accelerated audio (3x faster).
+
+**Root Cause**:
+- Embedded device's default sample rate: **16000 Hz** (matches target output rate!)
+- Config tried to force: **48000 Hz**
+- PortAudio may silently accept 48kHz request but actually use 16kHz
+- Code assumed 48kHz was used → resampled "16000→16000" as if it was "48000→16000"
+- Result: 3:1 compression → audio plays 3x faster
+
+**Example from logs**:
+```
+选中录音设备: default (默认采样率: 16000 Hz)
+使用已知的实际采样率: 48000 Hz  ← Wrong assumption!
+重采样: 48000 Hz -> 16000 Hz      ← Compressing already-16kHz audio!
+```
+
+**The Fix**:
+Changed sample rate selection strategy with smart priority order:
+
+1. **If device default rate == target rate (e.g., both 16kHz)**: Use device default directly → **no resampling needed!**
+2. **Otherwise**: Try configured capture rate (48kHz)
+3. **If that fails**: Fall back to device default rate
+
+This ensures optimal behavior for all devices:
+- ✅ PC with 48kHz device → capture at 48kHz, resample to 16kHz (quality improvement)
+- ✅ Embedded with 16kHz device → capture at 16kHz directly, no resampling (perfect match, no CPU waste!)
+- ✅ Any device → always uses the correct actual sample rate for any resampling operations
+
+### Update 1: Actual Sample Rate Tracking
+Fixed bug where `TestRecording()` always used configured `CaptureSampleRate` for resampling, ignoring what the device actually opened with.
+
+**The Fix**: Added `actualCaptureSampleRate` field to track real device sample rate.
+
 ## Solution
 Implemented audio resampling to bridge the gap between hardware capabilities and server requirements:
 
