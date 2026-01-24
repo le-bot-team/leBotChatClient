@@ -4,8 +4,8 @@
 	"name": "Go",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"build": {
-		"dockerfile": "../build/Dockerfile",
-		"context": ".."
+		"dockerfile": "Dockerfile",
+		"context": "../build"
 	},
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
