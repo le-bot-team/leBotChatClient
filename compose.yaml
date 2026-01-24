@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  builder:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    container_name: chat_client_builder
+    working_dir: /workspace
+    volumes:
+      # 挂载项目源码
+      - .:/workspace
+      # 挂载工具链（方式1：如果你有本地工具链）
+      # 取消注释下面这行，并修改为你的工具链路径
+      # - ~/coding/t113-s3_sunxi-musl_toolchain:/opt/toolchain:ro
+      
+      # 持久化 Go 模块缓存
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      
+      # 持久化已编译的依赖库（避免重复编译）
+      - toolchain-libs:/opt/toolchain
+    environment:
+      - TOOLCHAIN_PATH=/opt/toolchain
+      - CGO_ENABLED=1
+      - GOOS=linux
+      - GOARCH=arm
+      - GOARM=7
+    # 默认命令：显示帮助信息
+    command: >
+      bash -c "
+        echo '======================================'
+        echo 'Chat Client 交叉编译环境'
+        echo '======================================'
+        echo ''
+        echo '可用命令：'
+        echo '  1. 设置工具链（如果未挂载）：'
+        echo '     docker compose run builder bash /build/build_toolchain.sh'
+        echo ''
+        echo '  2. 编译依赖库（ALSA + PortAudio）：'
+        echo '     docker compose run builder bash /build/build_dependencies.sh'
+        echo ''
+        echo '  3. 编译应用程序：'
+        echo '     docker compose run builder bash /build/build_app.sh'
+        echo ''
+        echo '  4. 一键编译（工具链已挂载时）：'
+        echo '     docker compose run builder bash -c \"/build/build_dependencies.sh && /build/build_app.sh\"'
+        echo ''
+        echo '  5. 进入交互式 Shell：'
+        echo '     docker compose run builder bash'
+        echo ''
+        echo '======================================'
+        echo ''
+        echo '提示：'
+        echo '- 如果你有本地工具链，请编辑 compose.yaml 取消注释工具链挂载行'
+        echo '- 如果没有工具链，请将工具链打包为 toolchain.tar.gz 放到项目根目录'
+        echo '- 编译产物将输出到 ./build/ 目录'
+        echo ''
+      "
+
+volumes:
+  # Go 模块缓存
+  go-mod-cache:
+    driver: local
+  
+  # Go 构建缓存
+  go-build-cache:
+    driver: local
+  
+  # 工具链和依赖库（避免重复编译）
+  toolchain-libs:
+    driver: local

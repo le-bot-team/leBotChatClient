@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# 构建产物
+build/
+*.o
+*.a
+*.so
+
+# Go
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.log
+*.tmp
+.DS_Store
+
+# 测试
+test/
+
+# 文档（如果不需要在容器中）
+*.md
+!README.md
+
+# Docker
+.dockerignore
