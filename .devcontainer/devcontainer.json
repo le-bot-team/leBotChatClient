@@ -1,0 +1,46 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/go .
+{
+	"name": "Go",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"build": {
+		"dockerfile": "../build/Dockerfile",
+		"context": ".."
+	},
+
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	// "postCreateCommand": "go version",
+
+	// Configure tool-specific properties.
+	"customizations": {
+		"jetbrains": {
+			"backend": "GoLand"
+		}
+	},
+
+	"workspaceFolder": "/workspace",
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+		"source=go-mod-cache,target=/go/pkg/mod,type=volume",
+		"source=go-build-cache,target=/root/.cache/go-build,type=volume",
+		"source=toolchain-libs,target=/opt/toolchain,type=volume",
+		"source=${localWorkspaceFolder}/build/toolchain.tar.gz,target=/build/toolchain.tar.gz,type=bind,consistency=cached"
+	],
+	"containerEnv": {
+		"TOOLCHAIN_PATH": "/opt/toolchain",
+		"CGO_ENABLED": "1",
+		"GOOS": "linux",
+		"GOARCH": "arm",
+		"GOARM": "7"
+	},
+	"postCreateCommand": "bash -lc '/build/build_toolchain.sh && /build/build_dependencies.sh'",
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}

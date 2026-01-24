@@ -8,7 +8,6 @@ services:
     container_name: chat_client_builder
     working_dir: /workspace
     volumes:
-      # 挂载项目源码
       - .:/workspace
       # 挂载工具链
       # 方式1：如果你有本地工具链，可以直接挂载使用。取消注释下面这行，并修改为你的工具链路径
@@ -19,7 +18,6 @@ services:
       # 持久化 Go 模块缓存
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/root/.cache/go-build
-      
       # 持久化已编译的依赖库（避免重复编译）
       - toolchain-libs:/opt/toolchain
     environment:
@@ -28,7 +26,6 @@ services:
       - GOOS=linux
       - GOARCH=arm
       - GOARM=7
-    # 一键编译：启动即完成工具链准备、依赖编译、应用编译
     command: >
       bash -c "
         set -e
@@ -36,35 +33,6 @@ services:
         /build/build_dependencies.sh
         /build/build_app.sh
       "
-
-  dev:
-    build:
-      context: build
-      dockerfile: Dockerfile
-    container_name: chat_client_dev
-    working_dir: /workspace
-    volumes:
-      - .:/workspace
-      - ./build/toolchain.tar.gz:/build/toolchain.tar.gz:ro
-      - go-mod-cache:/go/pkg/mod
-      - go-build-cache:/root/.cache/go-build
-      - toolchain-libs:/opt/toolchain
-    environment:
-      - TOOLCHAIN_PATH=/opt/toolchain
-      - CGO_ENABLED=1
-      - GOOS=linux
-      - GOARCH=arm
-      - GOARM=7
-    stdin_open: true
-    tty: true
-    command: >
-      bash -c "
-        set -e
-        /build/build_toolchain.sh
-        /build/build_dependencies.sh
-        exec bash
-      "
-
 volumes:
   # Go 模块缓存
   go-mod-cache:
