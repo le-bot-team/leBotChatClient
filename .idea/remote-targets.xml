@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteTargetsManager">
+    <option name="projectDefaultTargetUuid" value="505046e7-e36e-48af-a264-0e8f9ec89e6f" />
+    <targets>
+      <target name="dev" type="docker-compose" uuid="505046e7-e36e-48af-a264-0e8f9ec89e6f">
+        <config>
+          <option name="targetPlatform">
+            <TargetPlatform />
+          </option>
+          <option name="configurationFiles">
+            <list>
+              <option value="C:\Users\particleg\coding\GolandProjects\leBotChatClient\compose.yaml" />
+            </list>
+          </option>
+          <option name="serviceName" value="dev" />
+        </config>
+        <ContributedStateBase type="GoLanguageRuntime">
+          <config>
+            <option name="compiledExecutablesVolume">
+              <VolumeState>
+                <option name="remotePath" value="/workspace/build" />
+              </VolumeState>
+            </option>
+            <option name="goPath" value="/go" />
+            <option name="goRoot" value="/usr/local/go/bin/go" />
+            <option name="goVersion" value="go1.25.6 linux/amd64" />
+            <option name="projectSourcesVolume">
+              <VolumeState>
+                <option name="remotePath" value="/workspace" />
+              </VolumeState>
+            </option>
+          </config>
+        </ContributedStateBase>
+      </target>
+    </targets>
+  </component>
+</project>

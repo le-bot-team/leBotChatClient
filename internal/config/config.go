@@ -1,9 +1,17 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
 
 // Config 应用程序配置
 type Config struct {
@@ -74,8 +82,10 @@ func DefaultConfig() *Config {
 	chunkSampleCount := int(outputSampleRate * chunkDuration / time.Second)
 	chunkByteSize := chunkSampleCount * audioChannels * bitDepth
 
-	// 从环境变量读取debug模式设置
-	enableDebug := os.Getenv("DEBUG") == "1"
+	// Read configs from environment variables
+	accessToken := getEnv("ACCESS_TOKEN", "019bf218-a79a-7000-a5d4-88f298c5f0ba")
+	enableDebug := getEnv("DEBUG", "0") == "1"
+	websocketHost := getEnv("WEBSOCKET_URL", "ws://cafuuchino.studio26f.org:10580")
 
 	return &Config{
 		EnableDebug: enableDebug, // 全局调试开关
@@ -90,8 +100,7 @@ func DefaultConfig() *Config {
 			ChunkByteSize:     chunkByteSize,
 		},
 		WebSocket: WebSocketConfig{
-			// URL: "wss://cafuuchino.studio26f.org:10543/api/v1/chat/ws?token=019adea1-3290-7000-8567-448dd6ff7c6f",
-			URL:            "ws://cafuuchino.studio26f.org:10580/api/v1/chat/ws?token=019adea1-3290-7000-8567-448dd6ff7c6f",
+			URL:            fmt.Sprintf("%s/api/v1/chat/ws?token=%s", websocketHost, accessToken),
 			ReconnectDelay: 5 * time.Second,
 			PingInterval:   30 * time.Second,
 			WriteTimeout:   10 * time.Second,
