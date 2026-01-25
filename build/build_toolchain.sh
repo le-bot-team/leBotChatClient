@@ -13,11 +13,12 @@ echo -e "${GREEN}Setting ARM OpenWrt toolchain${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 TOOLCHAIN_PATH="${TOOLCHAIN_PATH:-/opt/toolchain}"
+TOOLCHAIN_TAR_PATH="${TOOLCHAIN_TAR_PATH:-/build/toolchain.tar.gz}"
 
 # Skip if toolchain is already mounted with required files
 if [ -f "${TOOLCHAIN_PATH}/bin/arm-openwrt-linux-muslgnueabi-gcc" ]; then
     echo -e "${GREEN}[OK] Toolchain already present, skipping download${NC}"
-    ${TOOLCHAIN_PATH}/bin/arm-openwrt-linux-muslgnueabi-gcc --version
+    "${TOOLCHAIN_PATH}/bin/arm-openwrt-linux-muslgnueabi-gcc" --version
     exit 0
 fi
 
@@ -27,10 +28,10 @@ echo -e "${YELLOW}Option 2: place the toolchain archive at /build/toolchain.tar.
 echo ""
 
 # Check for toolchain archive
-if [ -f "/build/toolchain.tar.gz" ]; then
+if [ -f "$TOOLCHAIN_TAR_PATH" ]; then
     echo -e "${YELLOW}Extracting toolchain...${NC}"
     mkdir -p "$TOOLCHAIN_PATH"
-    tar xzf /build/toolchain.tar.gz -C "$TOOLCHAIN_PATH"
+    tar xzf "$TOOLCHAIN_TAR_PATH" -C "$TOOLCHAIN_PATH"
 
     # If the toolchain is nested inside a subdirectory, flatten it
     if [ ! -f "${TOOLCHAIN_PATH}/bin/arm-openwrt-linux-muslgnueabi-gcc" ]; then

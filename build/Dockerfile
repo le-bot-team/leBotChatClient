@@ -15,9 +15,6 @@ RUN apt-get update && apt-get install -y \
     rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /build
-
 # Toolchain directory
 ENV TOOLCHAIN_PATH=/opt/toolchain
 ENV PATH="${TOOLCHAIN_PATH}/bin:${PATH}"
@@ -42,10 +39,5 @@ ENV GOARM=7
 
 # Create toolchain directory
 RUN mkdir -p ${TOOLCHAIN_PATH}
-
-# Copy build scripts
-COPY build_toolchain.sh /build/
-COPY build_dependencies.sh /build/
-COPY build_app.sh /build/
 
 CMD ["/bin/bash"]
