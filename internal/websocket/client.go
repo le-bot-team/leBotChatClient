@@ -14,7 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// MessageHandler 消息处理器接口
+// MessageHandler defines the message handler interface
 type MessageHandler interface {
 	HandleOutputAudioStream(resp *OutputAudioStreamResponse)
 	HandleOutputAudioComplete(resp *OutputAudioCompleteResponse)
@@ -24,25 +24,25 @@ type MessageHandler interface {
 	HandleUpdateConfig(resp *UpdateConfigResponse)
 }
 
-// Client WebSocket客户端
+// Client is the WebSocket client
 type Client struct {
 	config  *config.WebSocketConfig
 	conn    *websocket.Conn
 	handler MessageHandler
 	mutex   sync.RWMutex
 
-	// 通道和上下文
+	// Channels and context
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// 重连控制
+	// Reconnection control
 	reconnectChan chan struct{}
 
-	// 调试模式
+	// Debug mode
 	enableDebug bool
 }
 
-// NewClient 创建新的WebSocket客户端
+// NewClient creates a new WebSocket client
 func NewClient(cfg *config.WebSocketConfig, handler MessageHandler, enableDebug bool) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -56,13 +56,13 @@ func NewClient(cfg *config.WebSocketConfig, handler MessageHandler, enableDebug 
 	}
 }
 
-// Start 启动WebSocket客户端
+// Start starts the WebSocket client
 func (c *Client) Start() error {
 	go c.connectLoop()
 	return nil
 }
 
-// Stop 停止WebSocket客户端
+// Stop stops the WebSocket client
 func (c *Client) Stop() error {
 	c.cancel()
 
@@ -75,33 +75,33 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// SendMessage 发送消息
+// SendMessage sends a message
 func (c *Client) SendMessage(message interface{}) error {
 	c.mutex.RLock()
 	conn := c.conn
 	c.mutex.RUnlock()
 
 	if conn == nil {
-		return fmt.Errorf("WebSocket未连接")
+		return fmt.Errorf("WebSocket not connected")
 	}
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("JSON编码失败: %w", err)
+		return fmt.Errorf("JSON encoding failed: %w", err)
 	}
 
 	if err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); err != nil {
-		return fmt.Errorf("设置写超时失败: %w", err)
+		return fmt.Errorf("Failed to set write deadline: %w", err)
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		return fmt.Errorf("发送消息失败: %w", err)
+		return fmt.Errorf("Failed to send message: %w", err)
 	}
 
 	return nil
 }
 
-// SendUpdateConfig 发送更新配置请求
+// SendUpdateConfig sends an update config request
 func (c *Client) SendUpdateConfig(requestID string, deviceConfig *config.DeviceConfig) error {
 	updateMsg := UpdateConfigRequest{
 		ID:     requestID,
@@ -118,7 +118,7 @@ func (c *Client) SendUpdateConfig(requestID string, deviceConfig *config.DeviceC
 	return c.SendMessage(updateMsg)
 }
 
-// SendAudioStream 发送音频流数据
+// SendAudioStream sends audio stream data
 func (c *Client) SendAudioStream(requestID string, wavData []byte) error {
 	msg := InputAudioStreamRequest{
 		ID:     requestID,
@@ -129,7 +129,7 @@ func (c *Client) SendAudioStream(requestID string, wavData []byte) error {
 	return c.SendMessage(msg)
 }
 
-// SendAudioComplete 发送音频完成请求
+// SendAudioComplete sends audio complete request
 func (c *Client) SendAudioComplete(requestID string, wavData []byte) error {
 	msg := InputAudioCompleteRequest{
 		ID:     requestID,
@@ -143,7 +143,7 @@ func (c *Client) SendAudioComplete(requestID string, wavData []byte) error {
 	return c.SendMessage(msg)
 }
 
-// SendCancelOutput 发送取消输出请求
+// SendCancelOutput sends cancel output request
 func (c *Client) SendCancelOutput(requestID string) error {
 	msg := CancelOutputRequest{
 		ID:     requestID,
@@ -152,7 +152,7 @@ func (c *Client) SendCancelOutput(requestID string) error {
 	return c.SendMessage(msg)
 }
 
-// SendClearContext 发送清除上下文请求
+// SendClearContext sends clear context request
 func (c *Client) SendClearContext(requestID string) error {
 	msg := ClearContextRequest{
 		ID:     requestID,
@@ -161,14 +161,14 @@ func (c *Client) SendClearContext(requestID string) error {
 	return c.SendMessage(msg)
 }
 
-// IsConnected 检查连接状态
+// IsConnected checks connection status
 func (c *Client) IsConnected() bool {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.conn != nil
 }
 
-// connectLoop 连接循环
+// connectLoop is the connection loop
 func (c *Client) connectLoop() {
 	for {
 		select {
@@ -176,7 +176,7 @@ func (c *Client) connectLoop() {
 			return
 		default:
 			if err := c.connect(); err != nil {
-				log.Printf("WebSocket连接失败: %v (%.1f秒后重试)", err, c.config.ReconnectDelay.Seconds())
+				log.Printf("WebSocket connection failed: %v (retrying in %.1f seconds)", err, c.config.ReconnectDelay.Seconds())
 				select {
 				case <-c.ctx.Done():
 					return
@@ -185,13 +185,13 @@ func (c *Client) connectLoop() {
 				}
 			}
 
-			// 连接成功，开始消息循环
+			// Connection successful, start message loop
 			c.messageLoop()
 		}
 	}
 }
 
-// connect 建立连接
+// connect establishes a connection
 func (c *Client) connect() error {
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = c.config.WriteTimeout
@@ -201,7 +201,7 @@ func (c *Client) connect() error {
 		return err
 	}
 
-	// 设置连接参数
+	// Set connection parameters
 	conn.SetReadLimit(c.config.MaxMessageSize)
 	conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 	conn.SetPongHandler(func(string) error {
@@ -214,12 +214,12 @@ func (c *Client) connect() error {
 	c.mutex.Unlock()
 
 	if c.enableDebug {
-		log.Println("WebSocket连接成功")
+		log.Println("WebSocket connected successfully")
 	}
 	return nil
 }
 
-// messageLoop 消息循环
+// messageLoop is the message loop
 func (c *Client) messageLoop() {
 	defer func() {
 		c.mutex.Lock()
@@ -229,11 +229,11 @@ func (c *Client) messageLoop() {
 		}
 		c.mutex.Unlock()
 		if c.enableDebug {
-			log.Println("WebSocket连接已断开")
+			log.Println("WebSocket connection disconnected")
 		}
 	}()
 
-	// 启动ping协程
+	// Start ping goroutine
 	go c.pingLoop()
 
 	for {
@@ -251,18 +251,18 @@ func (c *Client) messageLoop() {
 
 			_, message, err := conn.ReadMessage()
 			if err != nil {
-				log.Printf("WebSocket接收错误: %v", err)
+				log.Printf("WebSocket receive error: %v", err)
 				return
 			}
 
 			if err := c.handleMessage(message); err != nil {
-				log.Printf("处理消息失败: %v", err)
+				log.Printf("Failed to handle message: %v", err)
 			}
 		}
 	}
 }
 
-// pingLoop ping循环
+// pingLoop is the ping loop
 func (c *Client) pingLoop() {
 	ticker := time.NewTicker(c.config.PingInterval)
 	defer ticker.Stop()
@@ -285,67 +285,67 @@ func (c *Client) pingLoop() {
 			}
 
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("发送ping失败: %v", err)
+				log.Printf("Failed to send ping: %v", err)
 				return
 			}
 		}
 	}
 }
 
-// handleMessage 处理收到的消息
+// handleMessage handles received messages
 func (c *Client) handleMessage(message []byte) error {
-	// 解析通用响应结构获取action类型
+	// Parse generic response structure to get action type
 	var baseResp GenericServerResponse
 	if err := json.Unmarshal(message, &baseResp); err != nil {
-		return fmt.Errorf("解析消息基础结构失败: %w", err)
+		return fmt.Errorf("Failed to parse message base structure: %w", err)
 	}
 
-	// 根据action类型处理不同响应
+	// Handle different responses based on action type
 	switch baseResp.Action {
 	case "outputAudioStream":
 		var resp OutputAudioStreamResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析音频流响应失败: %w", err)
+			return fmt.Errorf("Failed to parse audio stream response: %w", err)
 		}
 		c.handler.HandleOutputAudioStream(&resp)
 
 	case "outputAudioComplete":
 		var resp OutputAudioCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析音频完成响应失败: %w", err)
+			return fmt.Errorf("Failed to parse audio complete response: %w", err)
 		}
 		c.handler.HandleOutputAudioComplete(&resp)
 
 	case "outputTextStream":
 		var resp OutputTextStreamResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析文本流响应失败: %w", err)
+			return fmt.Errorf("Failed to parse text stream response: %w", err)
 		}
 		c.handler.HandleOutputTextStream(&resp)
 
 	case "outputTextComplete":
 		var resp OutputTextCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析文本完成响应失败: %w", err)
+			return fmt.Errorf("Failed to parse text complete response: %w", err)
 		}
 		c.handler.HandleOutputTextComplete(&resp)
 
 	case "chatComplete":
 		var resp ChatCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析聊天完成响应失败: %w", err)
+			return fmt.Errorf("Failed to parse chat complete response: %w", err)
 		}
 		c.handler.HandleChatComplete(&resp)
 
 	case "updateConfig":
 		var resp UpdateConfigResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("解析配置更新响应失败: %w", err)
+			return fmt.Errorf("Failed to parse config update response: %w", err)
 		}
 		c.handler.HandleUpdateConfig(&resp)
 
 	default:
-		log.Printf("收到未处理的响应类型: %s", baseResp.Action)
+		log.Printf("Received unhandled response type: %s", baseResp.Action)
 	}
 
 	return nil

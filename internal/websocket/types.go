@@ -1,6 +1,6 @@
 package websocket
 
-// InputAudioStreamRequest 输入音频流请求
+// InputAudioStreamRequest is the input audio stream request
 type InputAudioStreamRequest struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
@@ -9,7 +9,7 @@ type InputAudioStreamRequest struct {
 	} `json:"data"`
 }
 
-// InputAudioCompleteRequest 输入音频完成请求
+// InputAudioCompleteRequest is the input audio complete request
 type InputAudioCompleteRequest struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
@@ -18,7 +18,7 @@ type InputAudioCompleteRequest struct {
 	} `json:"data"`
 }
 
-// OutputAudioStreamResponse 输出音频流响应
+// OutputAudioStreamResponse is the output audio stream response
 type OutputAudioStreamResponse struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
@@ -29,7 +29,7 @@ type OutputAudioStreamResponse struct {
 	} `json:"data"`
 }
 
-// OutputAudioCompleteResponse 输出音频完成响应
+// OutputAudioCompleteResponse is the output audio complete response
 type OutputAudioCompleteResponse struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
@@ -39,7 +39,7 @@ type OutputAudioCompleteResponse struct {
 	} `json:"data"`
 }
 
-// OutputTextStreamResponse 输出文本流响应
+// OutputTextStreamResponse is the output text stream response
 type OutputTextStreamResponse struct {
 	ID      string `json:"id"`
 	Action  string `json:"action"`
@@ -52,7 +52,7 @@ type OutputTextStreamResponse struct {
 	} `json:"data"`
 }
 
-// OutputTextCompleteResponse 输出文本完成响应
+// OutputTextCompleteResponse is the output text complete response
 type OutputTextCompleteResponse struct {
 	ID      string `json:"id"`
 	Action  string `json:"action"`
@@ -65,7 +65,7 @@ type OutputTextCompleteResponse struct {
 	} `json:"data"`
 }
 
-// ChatCompleteResponse 聊天完成响应
+// ChatCompleteResponse is the chat complete response
 type ChatCompleteResponse struct {
 	ID      string `json:"id"`
 	Action  string `json:"action"`
@@ -83,24 +83,24 @@ type ChatCompleteResponse struct {
 	} `json:"data"`
 }
 
-// CancelOutputRequest 取消输出请求
+// CancelOutputRequest is the cancel output request
 type CancelOutputRequest struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
 }
 
-// ClearContextRequest 清除上下文请求
+// ClearContextRequest is the clear context request
 type ClearContextRequest struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
 }
 
-// GenericServerResponse 通用服务器响应
+// GenericServerResponse is the generic server response
 type GenericServerResponse struct {
 	Action string `json:"action"`
 }
 
-// UpdateConfigRequest 更新配置请求
+// UpdateConfigRequest is the update config request
 type UpdateConfigRequest struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
@@ -117,7 +117,7 @@ type UpdateConfigRequest struct {
 	} `json:"data"`
 }
 
-// UpdateConfigResponse 更新配置响应
+// UpdateConfigResponse is the update config response
 type UpdateConfigResponse struct {
 	ID      string `json:"id"`
 	Action  string `json:"action"`

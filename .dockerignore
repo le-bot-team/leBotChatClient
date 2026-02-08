@@ -2,7 +2,7 @@
 .git
 .gitignore
 
-# 构建产物
+# Build artifacts
 build/
 *.o
 *.a
@@ -18,15 +18,15 @@ vendor/
 *.swo
 *~
 
-# 临时文件
+# Temporary files
 *.log
 *.tmp
 .DS_Store
 
-# 测试
+# Tests
 test/
 
-# 文档（如果不需要在容器中）
+# Documentation (if not needed in container)
 *.md
 !README.md
 

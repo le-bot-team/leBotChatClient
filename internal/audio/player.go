@@ -12,29 +12,29 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
-// Player 音频播放器
+// Player is the audio player
 type Player struct {
 	config      *config.AudioConfig
 	audioBuffer *buffer.RingBuffer
 
-	// 播放状态
+	// Playback state
 	isPlaying     bool
 	audioComplete bool
 	mutex         sync.RWMutex
 	completeMutex sync.RWMutex
 
-	// 播放流
+	// Playback stream
 	stream *portaudio.Stream
 
-	// 上下文控制
+	// Context control
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// 调试模式
+	// Debug mode
 	enableDebug bool
 }
 
-// NewPlayer 创建新的音频播放器
+// NewPlayer creates a new audio player
 func NewPlayer(cfg *config.AudioConfig, enableDebug bool) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -47,7 +47,7 @@ func NewPlayer(cfg *config.AudioConfig, enableDebug bool) *Player {
 	}
 }
 
-// Stop 停止播放器
+// Stop stops the player
 func (p *Player) Stop() error {
 	p.cancel()
 
@@ -69,18 +69,18 @@ func (p *Player) Stop() error {
 	return nil
 }
 
-// WriteAudioData 写入音频数据
+// WriteAudioData writes audio data
 func (p *Player) WriteAudioData(audioData []byte) {
 	written := p.audioBuffer.Write(audioData)
 	if p.enableDebug {
-		log.Printf("写入缓冲区: %d 字节, 当前缓冲: %d 字节", written, p.audioBuffer.Length())
+		log.Printf("Buffer write: %d bytes, Current buffer: %d bytes", written, p.audioBuffer.Length())
 	}
 
-	// 如果当前没有在播放，启动播放
+	// If not currently playing, start playback
 	p.mutex.Lock()
 	if !p.isPlaying {
 		if p.enableDebug {
-			log.Println("开始播放...")
+			log.Println("Starting playback...")
 		}
 		p.isPlaying = true
 		go p.playAudio()
@@ -88,55 +88,55 @@ func (p *Player) WriteAudioData(audioData []byte) {
 	p.mutex.Unlock()
 }
 
-// SetAudioComplete 设置音频完成标志
+// SetAudioComplete sets the audio complete flag
 func (p *Player) SetAudioComplete(complete bool) {
 	p.completeMutex.Lock()
 	p.audioComplete = complete
 	p.completeMutex.Unlock()
 
 	if complete && p.enableDebug {
-		log.Println("收到播放完成指令")
+		log.Println("Received playback complete signal")
 	}
 }
 
-// ClearBuffer 清除音频缓冲区
+// ClearBuffer clears the audio buffer
 func (p *Player) ClearBuffer() {
 	p.audioBuffer.Clear()
 	if p.enableDebug {
-		log.Println("已清除音频缓冲区")
+		log.Println("Audio buffer cleared")
 	}
 }
 
-// StopPlayback 立即停止播放（用于打断）
+// StopPlayback immediately stops playback (for interruption)
 func (p *Player) StopPlayback() {
 	p.mutex.Lock()
 	if p.stream != nil && p.isPlaying {
 		if p.enableDebug {
-			log.Println("打断播放，停止音频流...")
+			log.Println("Interrupting playback, stopping audio stream...")
 		}
-		// 设置标志但不直接关闭 stream，让 playAudio 自然退出
+		// Set flag but don't close stream directly, let playAudio exit naturally
 		p.isPlaying = false
 	}
 	p.mutex.Unlock()
 
-	// 清除缓冲区
+	// Clear buffer
 	p.ClearBuffer()
-	// 重置完成标志
+	// Reset complete flag
 	p.SetAudioComplete(false)
 }
 
-// IsPlaying 检查是否正在播放
+// IsPlaying checks if currently playing
 func (p *Player) IsPlaying() bool {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
 	return p.isPlaying
 }
 
-// playAudio 播放音频数据
+// playAudio plays audio data
 func (p *Player) playAudio() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("播放崩溃: %v", r)
+			log.Printf("Playback panic: %v", r)
 		}
 
 		p.mutex.Lock()
@@ -144,12 +144,12 @@ func (p *Player) playAudio() {
 		if p.stream != nil {
 			stopErr := p.stream.Stop()
 			if stopErr != nil {
-				log.Printf("停止音频流失败: %v", stopErr)
+				log.Printf("Failed to stop audio stream: %v", stopErr)
 				return
 			}
 			closeErr := p.stream.Close()
 			if closeErr != nil {
-				log.Printf("关闭音频流失败: %v", closeErr)
+				log.Printf("Failed to close audio stream: %v", closeErr)
 				return
 			}
 			p.stream = nil
@@ -157,26 +157,26 @@ func (p *Player) playAudio() {
 		p.mutex.Unlock()
 
 		if p.enableDebug {
-			log.Println("播放结束")
+			log.Println("Playback ended")
 		}
 	}()
 
-	// 播放状态控制
+	// Playback state control
 	var shouldStop bool
 	emptyCount := 0
 	lastDataTime := time.Now()
 
-	// 使用回调函数模式打开流
+	// Open stream using callback function mode
 	var err error
 	p.stream, err = portaudio.OpenDefaultStream(
-		0, 1, // 输入0通道，输出1通道
+		0, 1, // 0 input channels, 1 output channel
 		float64(p.config.SampleRate),
-		0, // 使用默认缓冲区大小
+		0, // Use default buffer size
 		func(out []int16) {
-			// 准备字节缓冲区
+			// Prepare byte buffer
 			outBytes := make([]byte, len(out)*2)
 
-			// 从环形缓冲区读取
+			// Read from ring buffer
 			n, closed := p.audioBuffer.Read(outBytes)
 
 			if n > 0 {
@@ -186,39 +186,39 @@ func (p *Player) playAudio() {
 				emptyCount++
 			}
 
-			// 转换为int16
+			// Convert to int16
 			for i := 0; i < n/2; i++ {
 				out[i] = int16(outBytes[i*2]) | int16(outBytes[i*2+1])<<8
 			}
 
-			// 填充剩余部分为0
+			// Fill remaining with zeros
 			if n < len(outBytes) {
 				for i := n / 2; i < len(out); i++ {
 					out[i] = 0
 				}
 			}
 
-			// 检查停止条件
+			// Check stop conditions
 			p.completeMutex.RLock()
 			complete := p.audioComplete
 			p.completeMutex.RUnlock()
 
-			// 停止条件1: 收到完成指令且缓冲区空
+			// Stop condition 1: Received complete signal and buffer is empty
 			if complete && p.audioBuffer.Length() == 0 {
 				shouldStop = true
 			}
 
-			// 停止条件2: 超过5秒没有新数据
+			// Stop condition 2: No new data for more than 5 seconds
 			if time.Since(lastDataTime) > 5*time.Second {
 				shouldStop = true
 			}
 
-			// 停止条件3: 连续10次回调没有数据
+			// Stop condition 3: 10 consecutive callbacks with no data
 			if emptyCount >= 10 {
 				shouldStop = true
 			}
 
-			// 停止条件4: 缓冲区已关闭
+			// Stop condition 4: Buffer is closed
 			if closed {
 				shouldStop = true
 			}
@@ -226,32 +226,32 @@ func (p *Player) playAudio() {
 	)
 
 	if err != nil {
-		log.Printf("打开音频流失败: %v", err)
+		log.Printf("Failed to open audio stream: %v", err)
 		return
 	}
 
-	// 启动流
+	// Start stream
 	if err := p.stream.Start(); err != nil {
-		log.Printf("启动音频流失败: %v", err)
+		log.Printf("Failed to start audio stream: %v", err)
 		err := p.stream.Close()
 		if err != nil {
-			log.Printf("关闭音频流失败: %v", err)
+			log.Printf("Failed to close audio stream: %v", err)
 			return
 		}
 		p.stream = nil
 		return
 	}
 
-	log.Println("音频播放已启动...")
+	log.Println("Audio playback started...")
 
-	// 等待停止信号
+	// Wait for stop signal
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for !shouldStop {
 		select {
 		case <-ticker.C:
-			// 继续检查停止条件
+			// Continue checking stop conditions
 		case <-p.ctx.Done():
 			return
 		}

@@ -9,16 +9,16 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace
-      # 挂载工具链
-      # 方式1：如果你有本地工具链，可以直接挂载使用。取消注释下面这行，并修改为你的工具链路径
+      # Mount toolchain
+      # Option 1: If you have a local toolchain, mount it directly. Uncomment the line below and modify the path
       # - ~/coding/t113-s3_sunxi-musl_toolchain:/opt/toolchain:ro
-      # 方式2：使用容器内脚本下载和安装工具链
+      # Option 2: Use in-container script to download and install toolchain
       - ./build/toolchain.tar.gz:/build/toolchain.tar.gz:ro
       
-      # 持久化 Go 模块缓存
+      # Persist Go module cache
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/root/.cache/go-build
-      # 持久化已编译的依赖库（避免重复编译）
+      # Persist compiled dependencies (avoid recompilation)
       - toolchain-libs:/opt/toolchain
     environment:
       - TOOLCHAIN_PATH=/opt/toolchain
@@ -34,14 +34,14 @@ services:
         /build/build_app.sh
       "
 volumes:
-  # Go 模块缓存
+  # Go module cache
   go-mod-cache:
     driver: local
   
-  # Go 构建缓存
+  # Go build cache
   go-build-cache:
     driver: local
   
-  # 工具链和依赖库（避免重复编译）
+  # Toolchain and dependencies (avoid recompilation)
   toolchain-libs:
     driver: local

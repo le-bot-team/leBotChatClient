@@ -1,158 +1,158 @@
-# Debug模式使用说明
+# Debug Mode Usage Guide
 
-## 概述
+## Overview
 
-程序支持debug模式，用于输出详细的调试信息。在正常运行时，这些调试日志不会输出，以保持较好的性能和简洁的日志输出。
+The program supports debug mode for outputting detailed debugging information. During normal operation, these debug logs will not be output to maintain good performance and clean log output.
 
-## 启用Debug模式
+## Enabling Debug Mode
 
-通过环境变量 `DEBUG=1` 来启用debug模式：
+Enable debug mode via the `DEBUG=1` environment variable:
 
 ```bash
 DEBUG=1 ./leBotChatClient
 ```
 
-## Debug模式下的输出信息
+## Debug Mode Output
 
-### 1. 音频录制相关
+### 1. Audio Recording
 
-- **设备初始化信息**
+- **Device Initialization Info**
   ```
-  使用录音设备: <设备名> (输入通道: <数量>, 默认采样率: <Hz>, 捕获采样率: <Hz>, 输出采样率: <Hz>)
-  ```
-
-- **录音开始/停止**
-  ```
-  开始录音 (设备: <设备名>, 捕获采样率: <Hz>, 输出采样率: <Hz>)
-  停止录音
+  Selected recording device: <device name> (Input channels: <count>, Default sample rate: <Hz>, Capture sample rate: <Hz>, Output sample rate: <Hz>)
   ```
 
-- **音频诊断信息**（每个音频块）
+- **Recording Start/Stop**
   ```
-  音频诊断 - RMS: <值>, Peak: <值>, 静音比例: <百分比>%, 是否静音: <true/false>
+  Recording started (Device: <device name>, Capture sample rate: <Hz>, Output sample rate: <Hz>)
+  Recording stopped
+  ```
+
+- **Audio Diagnostics** (per audio chunk)
+  ```
+  Audio diagnostics - RMS: <value>, Peak: <value>, Silence ratio: <percentage>%, Is silent: <true/false>
   ```
   
-  - **RMS (均方根)**：反映音频的平均能量级别
-    - 语音通常在 500-5000 范围内
-    - 如果 RMS < 200，可能是静音或噪音太小
+  - **RMS (Root Mean Square)**: Reflects the average energy level of the audio
+    - Speech is typically in the 500-5000 range
+    - If RMS < 200, it may be silence or the noise is too low
   
-  - **Peak (峰值)**：音频的最大振幅
-    - 16位音频的最大值是 32767
-    - 语音通常峰值在 1000-20000 范围内
+  - **Peak**: Maximum amplitude of the audio
+    - Maximum value for 16-bit audio is 32767
+    - Speech peak is typically in the 1000-20000 range
   
-  - **静音比例**：采样点中静音的百分比
-    - 如果 > 95%，说明几乎是静音
-    - 正常语音通常在 20-60% 之间
+  - **Silence Ratio**: Percentage of silent samples
+    - If > 95%, it is essentially silence
+    - Normal speech is typically in the 20-60% range
 
-- **最后音频块诊断**
+- **Last Audio Chunk Diagnostics**
   ```
-  最后音频块诊断 - RMS: <值>, Peak: <值>, 静音比例: <百分比>%, 是否静音: <true/false>, 样本数: <数量>
-  发送最后的音频数据: <采样点数> 采样点
-  ```
-
-### 2. 音频发送相关
-
-- **音频数据块发送**
-  ```
-  发送WAV音频数据块: <字节数> 字节
+  Last audio chunk diagnostics - RMS: <value>, Peak: <value>, Silence ratio: <percentage>%, Is silent: <true/false>, Samples: <count>
+  Sending last audio data: <sample count> samples
   ```
 
-- **完成请求发送**
+### 2. Audio Sending
+
+- **Audio Data Chunk Sending**
   ```
-  发送完成请求(包含最后<字节数>字节WAV音频)
-  发送完成请求(无剩余音频)
+  Sending WAV audio data chunk: <bytes> bytes
   ```
 
-### 3. WebSocket通信相关
-
-- **连接状态**
+- **Completion Request Sending**
   ```
-  WebSocket连接成功
-  WebSocket连接已断开
+  Sending completion request (including last <bytes> bytes WAV audio)
+  Sending completion request (no remaining audio)
   ```
 
-- **配置更新**
+### 3. WebSocket Communication
+
+- **Connection Status**
   ```
-  收到配置更新响应: Success=<true/false>, Message=<消息>
-  更新请求已发送
-  更新响应成功，开始流式录音发送
+  WebSocket connected successfully
+  WebSocket connection disconnected
   ```
 
-### 4. 服务器响应相关
-
-- **音频流响应**
+- **Configuration Update**
   ```
-  收到音频流响应: ID=<请求ID>, 会话ID=<会话ID>, 对话ID=<对话ID>
-  音频数据大小: <字节数> 字节
-  音频输出完成: 会话ID=<会话ID>, 对话ID=<对话ID>
+  Received config update response: Success=<true/false>, Message=<message>
+  Update request sent
+  Update response succeeded, starting streaming recording
   ```
 
-- **文本流响应**
+### 4. Server Response
+
+- **Audio Stream Response**
   ```
-  收到文本流: ID=<对话ID>, 角色=<角色>, 文本=<内容>
-  文本输出完成: ID=<对话ID>, 角色=<角色>, 文本=<内容>
+  Received audio stream response: ID=<request ID>, Session ID=<session ID>, Chat ID=<chat ID>
+  Audio data size: <bytes> bytes
+  Audio output complete: Session ID=<session ID>, Chat ID=<chat ID>
   ```
 
-- **聊天完成**
+- **Text Stream Response**
   ```
-  聊天完成: ID=<对话ID>, 成功=<true/false>, 消息=<消息>
-  ```
-
-- **打断逻辑**
-  ```
-  检测到用户新消息，执行打断逻辑
+  Received text stream: ID=<chat ID>, Role=<role>, Text=<content>
+  Text output complete: ID=<chat ID>, Role=<role>, Text=<content>
   ```
 
-### 5. 音频播放相关
-
-- **写入缓冲区**
+- **Chat Complete**
   ```
-  写入缓冲区: <字节数> 字节, 当前缓冲: <字节数> 字节
+  Chat complete: ID=<chat ID>, Success=<true/false>, Message=<message>
   ```
 
-- **播放控制**
+- **Interruption Logic**
   ```
-  开始播放...
-  收到播放完成指令
-  已清除音频缓冲区
-  打断播放，停止音频流...
-  播放结束
-  音频播放已启动...
+  New user message detected, executing interruption logic
   ```
 
-## 正常模式 vs Debug模式
+### 5. Audio Playback
 
-### 正常模式（默认）
+- **Buffer Write**
+  ```
+  Buffer write: <bytes> bytes, Current buffer: <bytes> bytes
+  ```
+
+- **Playback Control**
+  ```
+  Starting playback...
+  Received playback complete signal
+  Audio buffer cleared
+  Interrupting playback, stopping audio stream...
+  Playback ended
+  Audio playback started...
+  ```
+
+## Normal Mode vs Debug Mode
+
+### Normal Mode (Default)
 ```bash
 ./leBotChatClient
 ```
-- 只输出必要的日志（错误、警告、关键状态）
-- 更好的性能
-- 日志更简洁
+- Only outputs essential logs (errors, warnings, critical states)
+- Better performance
+- Cleaner logs
 
-### Debug模式
+### Debug Mode
 ```bash
 DEBUG=1 ./leBotChatClient
 ```
-- 输出详细的调试信息
-- 适合排查问题
-- 可能有轻微的性能影响
+- Outputs detailed debugging information
+- Suitable for troubleshooting
+- May have slight performance impact
 
-## 使用场景
+## Use Cases
 
-### 何时使用正常模式
-- 生产环境运行
-- 不需要详细日志
-- 追求最佳性能
+### When to Use Normal Mode
+- Production environment
+- No need for detailed logs
+- Best performance required
 
-### 何时使用Debug模式
-- **调试音频问题**：检查录音是否包含有效语音
-- **排查通信问题**：查看WebSocket消息交互
-- **分析播放问题**：跟踪音频播放流程
-- **开发测试**：验证功能是否正常工作
+### When to Use Debug Mode
+- **Debugging Audio Issues**: Check if recording contains valid speech
+- **Troubleshooting Communication Issues**: View WebSocket message exchanges
+- **Analyzing Playback Issues**: Track audio playback flow
+- **Development Testing**: Verify functionality works correctly
 
-## 注意事项
+## Notes
 
-1. Debug模式会增加日志输出量，可能影响终端显示速度
-2. 在生产环境建议关闭debug模式以获得最佳性能
-3. 音频诊断信息每200ms输出一次（基于chunk duration配置）
+1. Debug mode increases log output volume, which may affect terminal display speed
+2. It is recommended to disable debug mode in production for optimal performance
+3. Audio diagnostics are output every 200ms (based on chunk duration configuration)

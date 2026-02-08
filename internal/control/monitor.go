@@ -10,21 +10,21 @@ import (
 	"websocket_client_chat/internal/config"
 )
 
-// Command 控制命令类型
+// Command is the control command type
 type Command string
 
 const (
-	CmdStartRecording Command = "1" // 开始录音
-	CmdStopRecording  Command = "2" // 停止录音
-	CmdTestRecording  Command = "3" // 测试录音
+	CmdStartRecording Command = "1" // Start recording
+	CmdStopRecording  Command = "2" // Stop recording
+	CmdTestRecording  Command = "3" // Test recording
 )
 
-// Handler 控制命令处理器接口
+// Handler is the control command handler interface
 type Handler interface {
 	HandleCommand(cmd Command)
 }
 
-// FileMonitor 文件监控器
+// FileMonitor is the file monitor
 type FileMonitor struct {
 	config  *config.ControlConfig
 	handler Handler
@@ -33,7 +33,7 @@ type FileMonitor struct {
 	cancel context.CancelFunc
 }
 
-// NewFileMonitor 创建新的文件监控器
+// NewFileMonitor creates a new file monitor
 func NewFileMonitor(cfg *config.ControlConfig, handler Handler) *FileMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -45,9 +45,9 @@ func NewFileMonitor(cfg *config.ControlConfig, handler Handler) *FileMonitor {
 	}
 }
 
-// Start 启动文件监控
+// Start starts file monitoring
 func (fm *FileMonitor) Start() error {
-	// 初始化控制文件
+	// Initialize control file
 	if err := fm.initControlFile(); err != nil {
 		return err
 	}
@@ -56,18 +56,18 @@ func (fm *FileMonitor) Start() error {
 	return nil
 }
 
-// Stop 停止文件监控
+// Stop stops file monitoring
 func (fm *FileMonitor) Stop() error {
 	fm.cancel()
 	return nil
 }
 
-// initControlFile 初始化控制文件
+// initControlFile initializes the control file
 func (fm *FileMonitor) initControlFile() error {
 	return ioutil.WriteFile(fm.config.FilePath, []byte{}, 0644)
 }
 
-// monitorLoop 监控循环
+// monitorLoop is the monitoring loop
 func (fm *FileMonitor) monitorLoop() {
 	ticker := time.NewTicker(fm.config.MonitorDelay)
 	defer ticker.Stop()
@@ -80,13 +80,13 @@ func (fm *FileMonitor) monitorLoop() {
 			return
 		case <-ticker.C:
 			if err := fm.checkFile(&lastCmd); err != nil {
-				log.Printf("检查控制文件失败: %v", err)
+				log.Printf("Failed to check control file: %v", err)
 			}
 		}
 	}
 }
 
-// checkFile 检查文件内容
+// checkFile checks file content
 func (fm *FileMonitor) checkFile(lastCmd *string) error {
 	content, err := ioutil.ReadFile(fm.config.FilePath)
 	if err != nil {
@@ -99,15 +99,15 @@ func (fm *FileMonitor) checkFile(lastCmd *string) error {
 	}
 
 	*lastCmd = currentValue
-	log.Printf("检测到命令: %s", currentValue)
+	log.Printf("Command detected: %s", currentValue)
 
-	// 处理命令
+	// Process command
 	cmd := Command(currentValue)
 	fm.handler.HandleCommand(cmd)
 
-	// 清空控制文件
+	// Clear control file
 	if err := ioutil.WriteFile(fm.config.FilePath, []byte{}, 0644); err != nil {
-		log.Printf("清空控制文件失败: %v", err)
+		log.Printf("Failed to clear control file: %v", err)
 	}
 
 	return nil

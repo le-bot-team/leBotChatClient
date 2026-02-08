@@ -13,28 +13,28 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// Config 应用程序配置
+// Config is the application configuration
 type Config struct {
 	Audio       AudioConfig     `json:"audio"`
 	WebSocket   WebSocketConfig `json:"websocket"`
 	Control     ControlConfig   `json:"control"`
 	Device      DeviceConfig    `json:"device"`
-	EnableDebug bool            `json:"enableDebug"` // 全局调试开关
+	EnableDebug bool            `json:"enableDebug"` // Global debug switch
 }
 
-// AudioConfig 音频配置
+// AudioConfig is the audio configuration
 type AudioConfig struct {
-	SampleRate        int           `json:"sampleRate"`        // 输出采样率（发送到服务器）
-	CaptureSampleRate int           `json:"captureSampleRate"` // 硬件捕获采样率
-	Channels          int           `json:"channels"`          // 声道数
-	BitDepth          int           `json:"bitDepth"`          // 位深度
-	BufferSize        int           `json:"bufferSize"`        // 缓冲区大小
-	ChunkDuration     time.Duration `json:"chunkDuration"`     // 音频块时长
-	ChunkSampleCount  int           `json:"chunkSampleCount"`  // 每块采样数（输出）
-	ChunkByteSize     int           `json:"chunkByteSize"`     // 每块字节数（输出）
+	SampleRate        int           `json:"sampleRate"`        // Output sample rate (sent to server)
+	CaptureSampleRate int           `json:"captureSampleRate"` // Hardware capture sample rate
+	Channels          int           `json:"channels"`          // Number of channels
+	BitDepth          int           `json:"bitDepth"`          // Bit depth
+	BufferSize        int           `json:"bufferSize"`        // Buffer size
+	ChunkDuration     time.Duration `json:"chunkDuration"`     // Audio chunk duration
+	ChunkSampleCount  int           `json:"chunkSampleCount"`  // Samples per chunk (output)
+	ChunkByteSize     int           `json:"chunkByteSize"`     // Bytes per chunk (output)
 }
 
-// WebSocketConfig WebSocket配置
+// WebSocketConfig is the WebSocket configuration
 type WebSocketConfig struct {
 	URL            string        `json:"url"`
 	ReconnectDelay time.Duration `json:"reconnectDelay"`
@@ -44,41 +44,41 @@ type WebSocketConfig struct {
 	MaxMessageSize int64         `json:"maxMessageSize"`
 }
 
-// ControlConfig 控制配置
+// ControlConfig is the control configuration
 type ControlConfig struct {
 	FilePath      string        `json:"filePath"`
 	MonitorDelay  time.Duration `json:"monitorDelay"`
 	ChannelBuffer int           `json:"channelBuffer"`
-	UseStdin      bool          `json:"useStdin"` // 使用标准输入控制（调试模式）
+	UseStdin      bool          `json:"useStdin"` // Use stdin control (debug mode)
 }
 
-// DeviceConfig 设备配置
+// DeviceConfig is the device configuration
 type DeviceConfig struct {
 	SerialNumber string   `json:"serialNumber"`
 	VoiceID      string   `json:"voiceId"`
 	SpeechRate   int      `json:"speechRate"`
 	OutputText   bool     `json:"outputText"`
 	Location     Location `json:"location"`
-	Timezone     string   `json:"timezone,omitempty"` // 时区，例如 "Asia/Shanghai"
+	Timezone     string   `json:"timezone,omitempty"` // Timezone, e.g. "Asia/Shanghai"
 }
 
-// Location 位置信息
+// Location is the location information
 type Location struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 }
 
-// DefaultConfig 返回默认配置
+// DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	const (
-		outputSampleRate  = 16000 // 服务器要求的采样率
-		captureSampleRate = 48000 // 硬件原生采样率
+		outputSampleRate  = 16000 // Sample rate required by server
+		captureSampleRate = 48000 // Native hardware sample rate
 		audioChannels     = 1
 		bitDepth          = 2
 		chunkDuration     = 200 * time.Millisecond
 	)
 
-	// 基于输出采样率计算chunk大小
+	// Calculate chunk size based on output sample rate
 	chunkSampleCount := int(outputSampleRate * chunkDuration / time.Second)
 	chunkByteSize := chunkSampleCount * audioChannels * bitDepth
 
@@ -88,7 +88,7 @@ func DefaultConfig() *Config {
 	websocketHost := getEnv("WEBSOCKET_URL", "ws://cafuuchino.studio26f.org:10580")
 
 	return &Config{
-		EnableDebug: enableDebug, // 全局调试开关
+		EnableDebug: enableDebug, // Global debug switch
 		Audio: AudioConfig{
 			SampleRate:        outputSampleRate,
 			CaptureSampleRate: captureSampleRate,
@@ -110,19 +110,19 @@ func DefaultConfig() *Config {
 		Control: ControlConfig{
 			FilePath:      "/tmp/chat-control",
 			MonitorDelay:  100 * time.Millisecond,
-			UseStdin:      true, // 默认使用标准输入（调试模式）
+			UseStdin:      true, // Default to stdin (debug mode)
 			ChannelBuffer: 1,
 		},
 		Device: DeviceConfig{
 			SerialNumber: "DEV-001",
 			VoiceID:      "xiaole",
 			SpeechRate:   0,
-			OutputText:   true, // 启用文本输出以支持打断逻辑
+			OutputText:   true, // Enable text output to support interruption logic
 			Location: Location{
 				Latitude:  0,
 				Longitude: 0,
 			},
-			Timezone: "Asia/Shanghai", // 默认时区
+			Timezone: "Asia/Shanghai", // Default timezone
 		},
 	}
 }

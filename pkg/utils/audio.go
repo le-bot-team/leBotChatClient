@@ -9,17 +9,17 @@ import (
 	"time"
 )
 
-// GenerateRequestID 生成请求ID
+// GenerateRequestID generates a request ID
 func GenerateRequestID(deviceSN string) string {
 	return fmt.Sprintf("%s-%d", deviceSN, time.Now().UnixNano())
 }
 
-// GenerateUUID 生成UUID v4
+// GenerateUUID generates a UUID v4
 func GenerateUUID() string {
 	uuid := make([]byte, 16)
 	rand.Read(uuid)
 
-	// 设置版本 (4) 和变体位
+	// Set version (4) and variant bits
 	uuid[6] = (uuid[6] & 0x0f) | 0x40 // Version 4
 	uuid[8] = (uuid[8] & 0x3f) | 0x80 // Variant 10
 
@@ -27,7 +27,7 @@ func GenerateUUID() string {
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
 }
 
-// GenerateWAVHeader 生成WAV文件头部
+// GenerateWAVHeader generates a WAV file header
 func GenerateWAVHeader(dataSize int, sampleRate int, channels int, bitDepth int) []byte {
 	header := make([]byte, 44)
 
@@ -58,18 +58,18 @@ func GenerateWAVHeader(dataSize int, sampleRate int, channels int, bitDepth int)
 	return header
 }
 
-// ConvertSamplesToWAV 将int16采样数据转换为WAV格式的字节数据
+// ConvertSamplesToWAV converts int16 sample data to WAV format byte data
 func ConvertSamplesToWAV(audioSamples []int16, sampleRate int, channels int, bitDepth int) []byte {
-	// PCM数据
+	// PCM data
 	pcmData := make([]byte, len(audioSamples)*2)
 	for i, sample := range audioSamples {
 		binary.LittleEndian.PutUint16(pcmData[i*2:], uint16(sample))
 	}
 
-	// 生成WAV头部
+	// Generate WAV header
 	header := GenerateWAVHeader(len(pcmData), sampleRate, channels, bitDepth)
 
-	// 合并头部和数据
+	// Merge header and data
 	wavData := make([]byte, 0, len(header)+len(pcmData))
 	wavData = append(wavData, header...)
 	wavData = append(wavData, pcmData...)
@@ -112,16 +112,16 @@ func ResampleAudio(input []int16, fromRate, toRate int) []int16 {
 	return output
 }
 
-// AudioStats 音频统计信息
+// AudioStats contains audio statistics
 type AudioStats struct {
-	RMS           float64 // 均方根值
-	Peak          int16   // 峰值
-	SilentSamples int     // 静音采样点数
-	TotalSamples  int     // 总采样点数
-	SilenceRatio  float64 // 静音比例
+	RMS           float64 // Root mean square value
+	Peak          int16   // Peak value
+	SilentSamples int     // Number of silent samples
+	TotalSamples  int     // Total number of samples
+	SilenceRatio  float64 // Silence ratio
 }
 
-// CalculateRMS 计算音频的RMS（均方根）值
+// CalculateRMS calculates the RMS (root mean square) value of audio
 func CalculateRMS(samples []int16) float64 {
 	if len(samples) == 0 {
 		return 0
@@ -136,7 +136,7 @@ func CalculateRMS(samples []int16) float64 {
 	return math.Sqrt(sum / float64(len(samples)))
 }
 
-// CalculateAudioStats 计算音频统计信息
+// CalculateAudioStats calculates audio statistics
 func CalculateAudioStats(samples []int16, silenceThreshold int16) AudioStats {
 	stats := AudioStats{
 		TotalSamples: len(samples),
@@ -146,7 +146,7 @@ func CalculateAudioStats(samples []int16, silenceThreshold int16) AudioStats {
 		return stats
 	}
 
-	// 计算RMS和峰值
+	// Calculate RMS and peak value
 	var sum float64
 	var peak int16
 	silentCount := 0
@@ -176,9 +176,9 @@ func CalculateAudioStats(samples []int16, silenceThreshold int16) AudioStats {
 	return stats
 }
 
-// IsSilent 判断音频是否为静音
-// rmsThreshold: RMS阈值，通常100-500之间
-// silenceRatioThreshold: 静音比例阈值，0-1之间
+// IsSilent determines if audio is silent
+// rmsThreshold: RMS threshold, typically between 100-500
+// silenceRatioThreshold: silence ratio threshold, between 0-1
 func IsSilent(samples []int16, rmsThreshold float64, silenceRatioThreshold float64) bool {
 	if len(samples) == 0 {
 		return true
@@ -186,13 +186,13 @@ func IsSilent(samples []int16, rmsThreshold float64, silenceRatioThreshold float
 
 	rms := CalculateRMS(samples)
 
-	// 如果RMS低于阈值，认为是静音
+	// If RMS is below threshold, consider it silent
 	if rms < rmsThreshold {
 		return true
 	}
 
-	// 检查静音比例
-	silenceThreshold := int16(rmsThreshold * 0.5) // 使用RMS阈值的一半作为采样点静音阈值
+	// Check silence ratio
+	silenceThreshold := int16(rmsThreshold * 0.5) // Use half of RMS threshold as sample silence threshold
 	stats := CalculateAudioStats(samples, silenceThreshold)
 
 	return stats.SilenceRatio > silenceRatioThreshold

@@ -11,11 +11,11 @@ This mode allows you to control recording by typing commands directly in the ter
 The application starts in this mode by default. Simply run the application and you'll see:
 
 ```
-语音对讲系统启动成功 (标准输入控制模式)
-输入命令:
-  1 或 start - 开始录音
-  2 或 stop  - 停止录音并发送
-  q 或 quit  - 退出程序
+Voice intercom system started successfully (stdin control mode)
+Enter command:
+  1 or start - Start recording
+  2 or stop  - Stop recording and send
+  q or quit  - Exit program
 ```
 
 ### Commands
@@ -48,11 +48,11 @@ To use this mode, set `UseStdin` to `false` in the configuration.
 When the application starts, you'll see:
 
 ```
-语音对讲系统启动成功 (文件控制模式)
-使用说明:
-向/tmp/chat-control写入:
-  1 - 开始录音
-  2 - 停止录音并发送
+Voice intercom system started successfully (file control mode)
+Usage:
+Write to /tmp/chat-control:
+  1 - Start recording
+  2 - Stop recording and send
 ```
 
 ### Commands

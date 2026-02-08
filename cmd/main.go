@@ -8,22 +8,22 @@ import (
 )
 
 func main() {
-	// 创建应用程序实例
+	// Create application instance
 	app := NewApp()
 
-	// 启动应用程序
+	// Start application
 	if err := app.Start(); err != nil {
-		log.Fatalf("启动应用程序失败: %v", err)
+		log.Fatalf("Failed to start application: %v", err)
 	}
 
-	// 设置信号处理
+	// Set up signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// 等待退出信号或应用程序结束
+	// Wait for exit signal or application to finish
 	select {
 	case sig := <-sigChan:
-		log.Printf("收到退出信号: %v", sig)
+		log.Printf("Received exit signal: %v", sig)
 	case <-func() <-chan struct{} {
 		ch := make(chan struct{})
 		go func() {
@@ -32,12 +32,12 @@ func main() {
 		}()
 		return ch
 	}():
-		log.Println("应用程序主动结束")
+		log.Println("Application terminated voluntarily")
 	}
 
-	// 优雅关闭
+	// Graceful shutdown
 	if err := app.Stop(); err != nil {
-		log.Printf("关闭应用程序失败: %v", err)
+		log.Printf("Failed to shut down application: %v", err)
 		os.Exit(1)
 	}
 }

@@ -1,243 +1,243 @@
-# 语音对讲系统 - 重构版本
+# Voice Intercom System - Refactored Version
 
-## 项目概述
+## Project Overview
 
-这是一个基于 WebSocket 的实时语音对讲系统客户端，支持：
-- ✅ 实时语音录制和流式传输
-- ✅ 流式音频播放
-- ✅ 智能打断（用户可随时打断 AI 回复）
-- ✅ 文本流接收和处理
-- ✅ 自动重连和心跳检测
-- ✅ 多种控制模式（标准输入/文件控制）
+This is a real-time voice intercom system client based on WebSocket, supporting:
+- Real-time voice recording and streaming
+- Streaming audio playback
+- Smart interruption (users can interrupt AI responses at any time)
+- Text stream receiving and processing
+- Auto-reconnection and heartbeat detection
+- Multiple control modes (standard input / file control)
 
-## 快速开始
+## Quick Start
 
-### 安装依赖
+### Install Dependencies
 
 ```bash
-# 安装 PortAudio（音频库）
+# Install PortAudio (audio library)
 # Ubuntu/Debian
 sudo apt-get install portaudio19-dev
 
 # macOS
 brew install portaudio
 
-# 安装 Go 依赖
+# Install Go dependencies
 go mod download
 ```
 
-### 运行
+### Run
 
 ```bash
-# 开发模式（使用标准输入控制）
+# Development mode (using standard input control)
 go run ./cmd
 
-# 或者构建后运行
+# Or build and run
 go build -o chat-client ./cmd
 ./chat-client
 ```
 
-### 使用说明
+### Usage
 
-#### 标准输入控制模式（默认）
+#### Standard Input Control Mode (Default)
 ```
-输入命令:
-  1 或 start - 开始录音
-  2 或 stop  - 停止录音并发送
-  q 或 quit  - 退出程序
+Enter command:
+  1 or start - Start recording
+  2 or stop  - Stop recording and send
+  q or quit  - Exit program
 ```
 
-#### 文件控制模式
-修改配置将 `UseStdin` 设为 `false`，然后：
+#### File Control Mode
+Modify configuration to set `UseStdin` to `false`, then:
 ```bash
-# 开始录音
+# Start recording
 echo 1 > /tmp/chat-control
 
-# 停止录音
+# Stop recording
 echo 2 > /tmp/chat-control
 ```
 
-优化后的项目采用了清晰的模块化架构，遵循Go语言的标准项目布局：
+The optimized project adopts a clean modular architecture following Go's standard project layout:
 
 ```
 leBotChatClient/
-├── cmd/                    # 应用程序入口
-│   ├── main.go            # 主函数
-│   └── app.go             # 应用程序核心逻辑
-├── internal/              # 内部包（不对外暴露）
-│   ├── config/            # 配置管理
-│   │   └── config.go      # 配置结构和默认值
-│   ├── websocket/         # WebSocket客户端
-│   │   ├── client.go      # WebSocket客户端实现
-│   │   └── types.go       # 消息类型定义
-│   ├── audio/             # 音频处理
-│   │   ├── recorder.go    # 音频录制器
-│   │   └── player.go      # 音频播放器
-│   └── control/           # 控制器
-│       └── monitor.go     # 文件监控器
-├── pkg/                   # 公共包（可对外暴露）
-│   ├── buffer/            # 缓冲区工具
-│   │   └── ring.go        # 环形缓冲区
-│   └── utils/             # 工具函数
-│       └── audio.go       # 音频处理工具
-├── go.mod                 # Go模块定义
-├── go.sum                 # 依赖校验
-├── readme.md              # 项目说明
-└── websocket_client_chat.go # 原始文件（可删除）
+├── cmd/                    # Application entry point
+│   ├── main.go            # Main function
+│   └── app.go             # Application core logic
+├── internal/              # Internal packages (not exposed)
+│   ├── config/            # Configuration management
+│   │   └── config.go      # Config structures and defaults
+│   ├── websocket/         # WebSocket client
+│   │   ├── client.go      # WebSocket client implementation
+│   │   └── types.go       # Message type definitions
+│   ├── audio/             # Audio processing
+│   │   ├── recorder.go    # Audio recorder
+│   │   └── player.go      # Audio player
+│   └── control/           # Controllers
+│       └── monitor.go     # File monitor
+├── pkg/                   # Public packages (externally accessible)
+│   ├── buffer/            # Buffer utilities
+│   │   └── ring.go        # Ring buffer
+│   └── utils/             # Utility functions
+│       └── audio.go       # Audio processing utilities
+├── go.mod                 # Go module definition
+├── go.sum                 # Dependency checksum
+├── readme.md              # Project documentation
+└── websocket_client_chat.go # Original file (can be deleted)
 ```
 
-## 架构设计优势
+## Architecture Design Advantages
 
-### 1. 模块化设计
-- **单一职责原则**: 每个模块只负责一个特定功能
-- **接口驱动**: 使用接口定义组件间的交互，便于测试和扩展
-- **依赖注入**: 通过构造函数注入依赖，降低耦合度
+### 1. Modular Design
+- **Single Responsibility Principle**: Each module handles only one specific function
+- **Interface-Driven**: Uses interfaces to define component interactions, facilitating testing and extension
+- **Dependency Injection**: Injects dependencies through constructors, reducing coupling
 
-### 2. 清晰的包结构
-- **cmd/**: 应用程序入口，包含main函数和应用核心逻辑
-- **internal/**: 应用程序内部实现，不对外暴露
-- **pkg/**: 可复用的公共包，可被其他项目引用
+### 2. Clear Package Structure
+- **cmd/**: Application entry point, contains main function and core application logic
+- **internal/**: Internal implementation, not exposed externally
+- **pkg/**: Reusable public packages, can be referenced by other projects
 
-### 3. 配置管理
-- 集中的配置管理，支持默认配置
-- 结构化配置，易于维护和扩展
-- 类型安全的配置项
+### 3. Configuration Management
+- Centralized configuration management with default config support
+- Structured configuration, easy to maintain and extend
+- Type-safe configuration items
 
-### 4. 错误处理
-- 统一的错误处理机制
-- 上下文传递和优雅关闭
-- 详细的日志记录
+### 4. Error Handling
+- Unified error handling mechanism
+- Context propagation and graceful shutdown
+- Detailed logging
 
-### 5. 并发安全
-- 使用sync包确保并发安全
-- 上下文控制goroutine生命周期
-- 原子操作处理共享状态
+### 5. Concurrency Safety
+- Uses sync package to ensure concurrency safety
+- Context controls goroutine lifecycle
+- Atomic operations for shared state management
 
-## 主要特性
+## Key Features
 
-### 🎙️ 音频处理
-- **流式录制**: 实时录制音频并分块发送（200ms/块）
-- **流式播放**: 接收到音频立即开始播放，降低延迟
-- **打断支持**: 用户可随时打断 AI 回复，系统自动停止播放并清空缓冲区
+### Audio Processing
+- **Streaming Recording**: Records audio in real-time and sends in chunks (200ms/chunk)
+- **Streaming Playback**: Starts playback immediately upon receiving audio, reducing latency
+- **Interruption Support**: Users can interrupt AI responses at any time, system automatically stops playback and clears buffer
 
-### 💬 WebSocket 通信
-- **完整协议支持**: 对齐前端实现，支持所有消息类型
-  - `inputAudioStream` / `inputAudioComplete` - 音频输入
-  - `outputAudioStream` / `outputAudioComplete` - 音频输出
-  - `outputTextStream` / `outputTextComplete` - 文本流
-  - `chatComplete` - 会话完成
-  - `updateConfig` - 配置更新
-  - `cancelOutput` - 取消输出
-  - `clearContext` - 清除上下文
-- **自动重连**: 断线自动重连，无需手动干预
-- **心跳检测**: 保持连接活跃，及时发现网络问题
+### WebSocket Communication
+- **Full Protocol Support**: Aligned with frontend implementation, supports all message types
+  - `inputAudioStream` / `inputAudioComplete` - Audio input
+  - `outputAudioStream` / `outputAudioComplete` - Audio output
+  - `outputTextStream` / `outputTextComplete` - Text stream
+  - `chatComplete` - Chat completion
+  - `updateConfig` - Configuration update
+  - `cancelOutput` - Cancel output
+  - `clearContext` - Clear context
+- **Auto-Reconnection**: Automatically reconnects on disconnection without manual intervention
+- **Heartbeat Detection**: Keeps connection alive, detects network issues promptly
 
-### 🎯 智能打断逻辑
-系统会自动检测用户的新消息：
-1. 监听 `outputTextComplete` 消息
-2. 当收到用户消息（`role: "user"` 且文本长度≥2）
-3. 自动停止当前播放的音频
-4. 清空音频缓冲区
-5. 准备接收新的响应
+### Smart Interruption Logic
+The system automatically detects new user messages:
+1. Listens for `outputTextComplete` messages
+2. When receiving a user message (`role: "user"` with text length >= 2)
+3. Automatically stops currently playing audio
+4. Clears audio buffer
+5. Prepares to receive new response
 
-### ⚙️ 灵活配置
-- 支持自定义采样率、声道数等音频参数
-- 可配置 WebSocket 连接参数
-- 支持设备信息和位置配置
-- 支持时区配置（如 "Asia/Shanghai"）
+### Flexible Configuration
+- Supports custom sample rate, channels, and other audio parameters
+- Configurable WebSocket connection parameters
+- Supports device info and location configuration
+- Supports timezone configuration (e.g., "Asia/Shanghai")
 
-## 项目结构
+## Project Structure
 
-### App（应用程序核心）
-- 统一管理所有组件的生命周期
-- 实现各组件间的消息传递接口
-- 处理应用程序的启动和关闭
+### App (Application Core)
+- Unified management of all component lifecycles
+- Implements message passing interfaces between components
+- Handles application startup and shutdown
 
-### WebSocket客户端
-- 自动重连机制
-- 心跳检测
-- 消息类型化处理
-- 并发安全的消息发送
+### WebSocket Client
+- Auto-reconnection mechanism
+- Heartbeat detection
+- Typed message handling
+- Concurrency-safe message sending
 
-### 音频录制器
-- 基于PortAudio的音频录制
-- 流式音频处理
-- 支持WAV格式转换
-- 异步音频数据处理
+### Audio Recorder
+- PortAudio-based audio recording
+- Streaming audio processing
+- WAV format conversion support
+- Asynchronous audio data processing
 
-### 音频播放器
-- 基于环形缓冲区的音频播放
-- 支持流式播放
-- 自动播放状态管理
-- 多种停止条件检测
+### Audio Player
+- Ring buffer-based audio playback
+- Streaming playback support
+- Automatic playback state management
+- Multiple stop condition detection
 
-### 控制器
-- 文件监控机制
-- 命令类型安全处理
-- 异步命令执行
+### Controller
+- File monitoring mechanism
+- Type-safe command handling
+- Asynchronous command execution
 
-### 环形缓冲区
-- 线程安全的环形缓冲区
-- 原子操作优化性能
-- 支持关闭状态检测
+### Ring Buffer
+- Thread-safe ring buffer
+- Atomic operation performance optimization
+- Close state detection support
 
-## 运行方式
+## Running
 
 ```bash
-# 方式1: 从cmd目录运行
+# Option 1: Run from cmd directory
 cd cmd
 go run .
 
-# 方式2: 从根目录运行
+# Option 2: Run from root directory
 go run ./cmd
 
-# 方式3: 构建后运行
+# Option 3: Build and run
 go build -o chat-client ./cmd
 ./chat-client
 ```
 
-## 使用方法
+## Usage
 
-系统启动后，通过控制文件进行操作：
+After system startup, operate via the control file:
 
 ```bash
-# 开始录音
+# Start recording
 echo 1 > /tmp/chat-control
 
-# 停止录音并发送
+# Stop recording and send
 echo 2 > /tmp/chat-control
 ```
 
-## 配置说明
+## Configuration
 
-所有配置都在 `internal/config/config.go` 中定义，包括：
+All configurations are defined in `internal/config/config.go`, including:
 
-- **音频配置**: 采样率、声道数、缓冲区大小等
-- **WebSocket配置**: 连接URL、重连间隔、超时设置等
-- **控制配置**: 控制文件路径、监控间隔等
-- **设备配置**: 设备序列号、语音设置等
+- **Audio Config**: Sample rate, channels, buffer size, etc.
+- **WebSocket Config**: Connection URL, reconnect interval, timeout settings, etc.
+- **Control Config**: Control file path, monitor interval, etc.
+- **Device Config**: Device serial number, voice settings, etc.
 
-## 扩展性
+## Extensibility
 
-优化后的架构支持以下扩展：
+The optimized architecture supports the following extensions:
 
-1. **新的音频格式**: 在utils包中添加新的转换函数
-2. **新的传输协议**: 实现MessageHandler接口
-3. **新的控制方式**: 实现Handler接口
-4. **配置文件支持**: 扩展config包支持JSON/YAML配置
-5. **插件系统**: 基于接口的插件架构
+1. **New Audio Formats**: Add new conversion functions in the utils package
+2. **New Transport Protocols**: Implement the MessageHandler interface
+3. **New Control Methods**: Implement the Handler interface
+4. **Config File Support**: Extend config package to support JSON/YAML configuration
+5. **Plugin System**: Interface-based plugin architecture
 
-## 测试支持
+## Testing Support
 
-由于采用了接口驱动的设计，每个组件都可以独立测试：
+Thanks to the interface-driven design, each component can be tested independently:
 
-- Mock实现各个接口进行单元测试
-- 依赖注入便于集成测试
-- 清晰的模块边界便于性能测试
+- Mock implementations of interfaces for unit testing
+- Dependency injection for integration testing
+- Clear module boundaries for performance testing
 
-## 性能优化
+## Performance Optimization
 
-1. **内存优化**: 复用缓冲区，减少内存分配
-2. **并发优化**: 异步处理，避免阻塞
-3. **网络优化**: 连接池和重连机制
-4. **音频优化**: 流式处理，减少延迟
+1. **Memory Optimization**: Buffer reuse, reduced memory allocation
+2. **Concurrency Optimization**: Asynchronous processing, avoid blocking
+3. **Network Optimization**: Connection pool and reconnection mechanism
+4. **Audio Optimization**: Streaming processing, reduced latency
