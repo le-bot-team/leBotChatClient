@@ -1,10 +1,9 @@
 package audio
 
 import (
-	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,8 +13,8 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
-// AudioHandler defines the audio data handler interface
-type AudioHandler interface {
+// Handler defines the audio data handler interface
+type Handler interface {
 	OnAudioChunk(requestID string, samples []int16, isLast bool)
 	OnRecordingComplete(requestID string, samples []int16)
 }
@@ -23,7 +22,7 @@ type AudioHandler interface {
 // Recorder is the audio recorder
 type Recorder struct {
 	config  *config.AudioConfig
-	handler AudioHandler
+	handler Handler
 
 	// Audio device state
 	targetDevice            *portaudio.DeviceInfo
@@ -42,23 +41,15 @@ type Recorder struct {
 	resampleBuffer     []int16 // Buffer for resampling
 	streamingMutex     sync.Mutex
 
-	// Context control
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	// Debug mode
 	enableDebug bool
 }
 
 // NewRecorder creates a new audio recorder
-func NewRecorder(cfg *config.AudioConfig, handler AudioHandler, enableDebug bool) *Recorder {
-	ctx, cancel := context.WithCancel(context.Background())
-
+func NewRecorder(cfg *config.AudioConfig, handler Handler, enableDebug bool) *Recorder {
 	return &Recorder{
 		config:                  cfg,
 		handler:                 handler,
-		ctx:                     ctx,
-		cancel:                  cancel,
 		enableDebug:             enableDebug,
 		actualCaptureSampleRate: cfg.CaptureSampleRate,
 	}
@@ -76,7 +67,7 @@ func (r *Recorder) Initialize() error {
 	// Initialize PortAudio
 	if !r.isPortAudioInit {
 		if err := portaudio.Initialize(); err != nil {
-			return fmt.Errorf("PortAudio initialization failed: %v", err)
+			return fmt.Errorf("portaudio initialization failed: %w", err)
 		}
 		r.isPortAudioInit = true
 	}
@@ -84,7 +75,9 @@ func (r *Recorder) Initialize() error {
 	// Find audio device
 	if err := r.findAudioDevice(); err != nil {
 		if r.isPortAudioInit {
-			portaudio.Terminate()
+			if termErr := portaudio.Terminate(); termErr != nil {
+				log.Printf("Failed to terminate PortAudio during rollback: %v", termErr)
+			}
 			r.isPortAudioInit = false
 		}
 		return err
@@ -99,7 +92,7 @@ func (r *Recorder) findAudioDevice() error {
 	// First try to get all available devices (without relying on Host API)
 	devices, err := portaudio.Devices()
 	if err != nil {
-		return fmt.Errorf("Failed to get device list: %v", err)
+		return fmt.Errorf("failed to get device list: %w", err)
 	}
 
 	if r.enableDebug {
@@ -127,7 +120,7 @@ func (r *Recorder) findAudioDevice() error {
 			log.Printf("Using default input device: %s", defDev.Name)
 			return nil
 		}
-		return fmt.Errorf("No audio devices found (including default device)")
+		return fmt.Errorf("no audio devices found (including default device)")
 	}
 
 	// Priority matching logic (from highest to lowest priority)
@@ -242,7 +235,7 @@ func (r *Recorder) findAudioDevice() error {
 			r.targetDevice = defDev
 			log.Println("Warning: no matching recording device found, using default input device")
 		} else {
-			return fmt.Errorf("No available recording device found")
+			return fmt.Errorf("no available recording device found")
 		}
 	}
 
@@ -259,8 +252,6 @@ func (r *Recorder) findAudioDevice() error {
 
 // Terminate terminates the audio system
 func (r *Recorder) Terminate() error {
-	r.cancel()
-
 	r.mutex.Lock()
 	if r.stream != nil {
 		stopErr := r.stream.Stop()
@@ -287,7 +278,7 @@ func (r *Recorder) Terminate() error {
 // StartRecording starts recording
 func (r *Recorder) StartRecording(requestID string) error {
 	if !r.deviceInitialized {
-		return fmt.Errorf("Audio device not initialized")
+		return fmt.Errorf("audio device not initialized")
 	}
 
 	r.mutex.Lock()
@@ -348,7 +339,7 @@ func (r *Recorder) StartRecording(requestID string) error {
 			r.stream, err = portaudio.OpenStream(params, r.audioCallback)
 		}
 		if err != nil {
-			return fmt.Errorf("Failed to open audio stream: %v", err)
+			return fmt.Errorf("failed to open audio stream: %w", err)
 		}
 	}
 
@@ -361,7 +352,7 @@ func (r *Recorder) StartRecording(requestID string) error {
 			return err
 		}
 		r.stream = nil
-		return fmt.Errorf("Failed to start recording: %v", err)
+		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
 	r.isRecording = true
@@ -513,14 +504,14 @@ func (r *Recorder) ConvertToWAV(samples []int16) []byte {
 func (r *Recorder) TestRecording(duration int, filename string) error {
 	// Check if already recording
 	if r.IsRecording() {
-		return fmt.Errorf("Currently recording, cannot start test recording")
+		return fmt.Errorf("currently recording, cannot start test recording")
 	}
 
 	log.Printf("Starting test recording, duration: %d seconds, saving to: %s", duration, filename)
 
 	// Initialize audio device
 	if err := r.Initialize(); err != nil {
-		return fmt.Errorf("Failed to initialize audio device: %v", err)
+		return fmt.Errorf("failed to initialize audio device: %w", err)
 	}
 
 	// Determine actual sample rate (prefer previously recorded actual sample rate)
@@ -565,17 +556,21 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 			stream, err = portaudio.OpenStream(streamParams, &readBuffer)
 		}
 		if err != nil {
-			return fmt.Errorf("Failed to open audio stream: %v", err)
+			return fmt.Errorf("failed to open audio stream: %w", err)
 		}
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			log.Printf("Failed to close test recording stream: %v", err)
+		}
+	}()
 
 	log.Printf("Test recording params: Sample rate=%d Hz, Channels=%d, Duration=%d seconds",
 		actualSampleRate, r.config.Channels, duration)
 
 	// Start recording
 	if err := stream.Start(); err != nil {
-		return fmt.Errorf("Failed to start audio stream: %v", err)
+		return fmt.Errorf("failed to start audio stream: %w", err)
 	}
 
 	log.Printf("Recording...")
@@ -665,8 +660,8 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 	wavData := r.ConvertToWAV(recordedSamples)
 
 	// Save to file
-	if err := ioutil.WriteFile(filename, wavData, 0644); err != nil {
-		return fmt.Errorf("Failed to save file: %v", err)
+	if err := os.WriteFile(filename, wavData, 0644); err != nil {
+		return fmt.Errorf("failed to save file: %w", err)
 	}
 
 	log.Printf("Test recording complete, file saved: %s (%.2f KB)", filename, float64(len(wavData))/1024)

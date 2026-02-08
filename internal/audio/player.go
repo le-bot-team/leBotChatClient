@@ -35,8 +35,8 @@ type Player struct {
 }
 
 // NewPlayer creates a new audio player
-func NewPlayer(cfg *config.AudioConfig, enableDebug bool) *Player {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewPlayer(parentCtx context.Context, cfg *config.AudioConfig, enableDebug bool) *Player {
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	return &Player{
 		config:      cfg,
@@ -135,22 +135,14 @@ func (p *Player) IsPlaying() bool {
 // playAudio plays audio data
 func (p *Player) playAudio() {
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Playback panic: %v", r)
-		}
-
 		p.mutex.Lock()
 		p.isPlaying = false
 		if p.stream != nil {
-			stopErr := p.stream.Stop()
-			if stopErr != nil {
-				log.Printf("Failed to stop audio stream: %v", stopErr)
-				return
+			if err := p.stream.Stop(); err != nil {
+				log.Printf("Failed to stop audio stream: %v", err)
 			}
-			closeErr := p.stream.Close()
-			if closeErr != nil {
-				log.Printf("Failed to close audio stream: %v", closeErr)
-				return
+			if err := p.stream.Close(); err != nil {
+				log.Printf("Failed to close audio stream: %v", err)
 			}
 			p.stream = nil
 		}

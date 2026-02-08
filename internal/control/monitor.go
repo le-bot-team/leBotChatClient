@@ -3,8 +3,8 @@ package control
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
 	"log"
+	"os"
 	"time"
 
 	"websocket_client_chat/internal/config"
@@ -17,6 +17,7 @@ const (
 	CmdStartRecording Command = "1" // Start recording
 	CmdStopRecording  Command = "2" // Stop recording
 	CmdTestRecording  Command = "3" // Test recording
+	CmdQuit           Command = "q" // Quit program
 )
 
 // Handler is the control command handler interface
@@ -34,8 +35,8 @@ type FileMonitor struct {
 }
 
 // NewFileMonitor creates a new file monitor
-func NewFileMonitor(cfg *config.ControlConfig, handler Handler) *FileMonitor {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewFileMonitor(parentCtx context.Context, cfg *config.ControlConfig, handler Handler) *FileMonitor {
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	return &FileMonitor{
 		config:  cfg,
@@ -64,7 +65,7 @@ func (fm *FileMonitor) Stop() error {
 
 // initControlFile initializes the control file
 func (fm *FileMonitor) initControlFile() error {
-	return ioutil.WriteFile(fm.config.FilePath, []byte{}, 0644)
+	return os.WriteFile(fm.config.FilePath, []byte{}, 0644)
 }
 
 // monitorLoop is the monitoring loop
@@ -88,7 +89,7 @@ func (fm *FileMonitor) monitorLoop() {
 
 // checkFile checks file content
 func (fm *FileMonitor) checkFile(lastCmd *string) error {
-	content, err := ioutil.ReadFile(fm.config.FilePath)
+	content, err := os.ReadFile(fm.config.FilePath)
 	if err != nil {
 		return err
 	}
@@ -106,7 +107,7 @@ func (fm *FileMonitor) checkFile(lastCmd *string) error {
 	fm.handler.HandleCommand(cmd)
 
 	// Clear control file
-	if err := ioutil.WriteFile(fm.config.FilePath, []byte{}, 0644); err != nil {
+	if err := os.WriteFile(fm.config.FilePath, []byte{}, 0644); err != nil {
 		log.Printf("Failed to clear control file: %v", err)
 	}
 

@@ -21,8 +21,8 @@ type StdinMonitor struct {
 }
 
 // NewStdinMonitor creates a new stdin monitor
-func NewStdinMonitor(cfg *config.ControlConfig, handler Handler) *StdinMonitor {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewStdinMonitor(parentCtx context.Context, cfg *config.ControlConfig, handler Handler) *StdinMonitor {
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	return &StdinMonitor{
 		config:  cfg,
@@ -97,9 +97,7 @@ func (sm *StdinMonitor) processCommand(input string) {
 		log.Println("Command: Test recording (will record 5s and save)")
 	case "q", "quit", "exit":
 		log.Println("Command: Exit program")
-		// Trigger program exit
-		// Trigger context cancellation by calling cancel, causing the main program to exit
-		sm.cancel()
+		sm.handler.HandleCommand(CmdQuit)
 		return
 	default:
 		fmt.Printf("Unknown command: %s\n", input)

@@ -43,8 +43,8 @@ type Client struct {
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(cfg *config.WebSocketConfig, handler MessageHandler, enableDebug bool) *Client {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewClient(parentCtx context.Context, cfg *config.WebSocketConfig, handler MessageHandler, enableDebug bool) *Client {
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	return &Client{
 		config:        cfg,
@@ -68,7 +68,9 @@ func (c *Client) Stop() error {
 
 	c.mutex.Lock()
 	if c.conn != nil {
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Printf("Failed to close WebSocket connection: %v", err)
+		}
 	}
 	c.mutex.Unlock()
 
@@ -82,20 +84,20 @@ func (c *Client) SendMessage(message interface{}) error {
 	c.mutex.RUnlock()
 
 	if conn == nil {
-		return fmt.Errorf("WebSocket not connected")
+		return fmt.Errorf("websocket not connected")
 	}
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("JSON encoding failed: %w", err)
+		return fmt.Errorf("json encoding failed: %w", err)
 	}
 
 	if err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); err != nil {
-		return fmt.Errorf("Failed to set write deadline: %w", err)
+		return fmt.Errorf("failed to set write deadline: %w", err)
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		return fmt.Errorf("Failed to send message: %w", err)
+		return fmt.Errorf("failed to send message: %w", err)
 	}
 
 	return nil
@@ -109,7 +111,7 @@ func (c *Client) SendUpdateConfig(requestID string, deviceConfig *config.DeviceC
 	}
 
 	updateMsg.Data.SpeechRate = deviceConfig.SpeechRate
-	updateMsg.Data.VoiceId = deviceConfig.VoiceID
+	updateMsg.Data.VoiceID = deviceConfig.VoiceID
 	updateMsg.Data.OutputText = deviceConfig.OutputText
 	updateMsg.Data.Location.Latitude = deviceConfig.Location.Latitude
 	updateMsg.Data.Location.Longitude = deviceConfig.Location.Longitude
@@ -203,10 +205,12 @@ func (c *Client) connect() error {
 
 	// Set connection parameters
 	conn.SetReadLimit(c.config.MaxMessageSize)
-	conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+	if err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout)); err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to set read deadline: %w", err)
+	}
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
-		return nil
+		return conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 	})
 
 	c.mutex.Lock()
@@ -224,7 +228,9 @@ func (c *Client) messageLoop() {
 	defer func() {
 		c.mutex.Lock()
 		if c.conn != nil {
-			c.conn.Close()
+			if err := c.conn.Close(); err != nil {
+				log.Printf("Failed to close WebSocket connection: %v", err)
+			}
 			c.conn = nil
 		}
 		c.mutex.Unlock()
@@ -297,7 +303,7 @@ func (c *Client) handleMessage(message []byte) error {
 	// Parse generic response structure to get action type
 	var baseResp GenericServerResponse
 	if err := json.Unmarshal(message, &baseResp); err != nil {
-		return fmt.Errorf("Failed to parse message base structure: %w", err)
+		return fmt.Errorf("failed to parse message base structure: %w", err)
 	}
 
 	// Handle different responses based on action type
@@ -305,42 +311,42 @@ func (c *Client) handleMessage(message []byte) error {
 	case "outputAudioStream":
 		var resp OutputAudioStreamResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse audio stream response: %w", err)
+			return fmt.Errorf("failed to parse audio stream response: %w", err)
 		}
 		c.handler.HandleOutputAudioStream(&resp)
 
 	case "outputAudioComplete":
 		var resp OutputAudioCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse audio complete response: %w", err)
+			return fmt.Errorf("failed to parse audio complete response: %w", err)
 		}
 		c.handler.HandleOutputAudioComplete(&resp)
 
 	case "outputTextStream":
 		var resp OutputTextStreamResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse text stream response: %w", err)
+			return fmt.Errorf("failed to parse text stream response: %w", err)
 		}
 		c.handler.HandleOutputTextStream(&resp)
 
 	case "outputTextComplete":
 		var resp OutputTextCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse text complete response: %w", err)
+			return fmt.Errorf("failed to parse text complete response: %w", err)
 		}
 		c.handler.HandleOutputTextComplete(&resp)
 
 	case "chatComplete":
 		var resp ChatCompleteResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse chat complete response: %w", err)
+			return fmt.Errorf("failed to parse chat complete response: %w", err)
 		}
 		c.handler.HandleChatComplete(&resp)
 
 	case "updateConfig":
 		var resp UpdateConfigResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
-			return fmt.Errorf("Failed to parse config update response: %w", err)
+			return fmt.Errorf("failed to parse config update response: %w", err)
 		}
 		c.handler.HandleUpdateConfig(&resp)
 

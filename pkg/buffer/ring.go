@@ -1,149 +1,133 @@
-// Package buffer provides a thread-safe ring buffer implementation
+// Package buffer provides a lock-free SPSC (Single-Producer Single-Consumer) ring buffer.
 package buffer
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
-// RingBuffer is a thread-safe ring buffer implementation
+// RingBuffer is a lock-free SPSC ring buffer.
+//
+// The writer goroutine is the sole modifier of w.
+// The reader goroutine (PortAudio callback) is the sole modifier of r.
+// Available data is computed as w - r (modular arithmetic on int64).
+//
+// int64 fields are placed first in the struct so that they are 8-byte aligned
+// even on 32-bit ARM7 (struct base is always at least pointer-aligned).
 type RingBuffer struct {
+	// w is the cumulative number of bytes written (only modified by producer).
+	w int64
+	// r is the cumulative number of bytes read (only modified by consumer).
+	r int64
+
 	buf    []byte
-	size   int
-	r, w   int32
-	count  int32
-	closed int32
+	size   int64
+	closed int32 // 1 = closed
+
+	// pad prevents false sharing between w and r on separate cache lines.
+	// On ARM Cortex-A7 the cache line is 32 or 64 bytes; this is good enough.
+	_ [unsafe.Sizeof(int64(0))]byte
 }
 
-// New creates a new ring buffer
+// New creates a new ring buffer with the given capacity in bytes.
 func New(size int) *RingBuffer {
 	return &RingBuffer{
 		buf:  make([]byte, size),
-		size: size,
+		size: int64(size),
 	}
 }
 
-// Write writes data to the buffer
-// Returns the number of bytes actually written
+// Write appends data to the buffer. Returns the number of bytes written.
+// Only safe to call from a single producer goroutine.
 func (rb *RingBuffer) Write(data []byte) int {
 	if atomic.LoadInt32(&rb.closed) == 1 {
 		return 0
 	}
 
-	total := 0
-	for len(data) > 0 {
-		// Atomically get current state
-		r := atomic.LoadInt32(&rb.r)
-		w := atomic.LoadInt32(&rb.w)
-		count := atomic.LoadInt32(&rb.count)
+	r := atomic.LoadInt64(&rb.r)
+	w := rb.w // producer owns w, no atomic load needed for own writes
 
-		// Calculate available space
-		avail := rb.size - int(count)
-		if avail == 0 {
-			break // Buffer is full
-		}
-
-		var toWrite int
-		if w < r {
-			// Write region is before read region
-			toWrite = min(len(data), int(r)-int(w))
-		} else {
-			// Write region is after read region
-			toWrite = min(len(data), rb.size-int(w))
-			if toWrite == 0 && r > 0 {
-				// If tail space is insufficient but head has space
-				atomic.StoreInt32(&rb.w, 0)
-				w = 0
-				toWrite = min(len(data), int(r))
-			}
-		}
-
-		if toWrite == 0 {
-			break
-		}
-
-		copy(rb.buf[w:], data[:toWrite])
-		newW := (w + int32(toWrite)) % int32(rb.size)
-		atomic.StoreInt32(&rb.w, newW)
-		atomic.AddInt32(&rb.count, int32(toWrite))
-
-		data = data[toWrite:]
-		total += toWrite
+	avail := rb.size - (w - r)
+	n := int64(len(data))
+	if n > avail {
+		n = avail
 	}
-	return total
+	if n == 0 {
+		return 0
+	}
+
+	// Write position within the circular buffer.
+	pos := w % rb.size
+	// First segment: from pos to end of buffer (or n, whichever is smaller).
+	first := min(n, rb.size-pos)
+	copy(rb.buf[pos:pos+first], data[:first])
+	// Second segment: wrap around to beginning.
+	if first < n {
+		copy(rb.buf[0:n-first], data[first:n])
+	}
+
+	// Publish the new write position. The store must be atomic so the
+	// consumer sees a consistent value.
+	atomic.StoreInt64(&rb.w, w+n)
+	return int(n)
 }
 
-// Read reads data from the buffer
-// Returns the number of bytes actually read and whether the buffer is closed
+// Read fills out with available data. Returns the number of bytes read and
+// whether the buffer is closed with no remaining data.
+// Only safe to call from a single consumer goroutine (the PortAudio callback).
 func (rb *RingBuffer) Read(out []byte) (int, bool) {
-	if atomic.LoadInt32(&rb.closed) == 1 && atomic.LoadInt32(&rb.count) == 0 {
-		return 0, true // Buffer is closed and has no data
+	w := atomic.LoadInt64(&rb.w)
+	r := rb.r // consumer owns r
+
+	avail := w - r
+	n := int64(len(out))
+	if n > avail {
+		n = avail
 	}
 
-	total := 0
-	for len(out) > 0 {
-		// Atomically get current state
-		r := atomic.LoadInt32(&rb.r)
-		w := atomic.LoadInt32(&rb.w)
-		count := atomic.LoadInt32(&rb.count)
-
-		if count <= 0 {
-			break // No data to read
-		}
-
-		var toRead int
-		if r < w {
-			// Read region is before write region
-			toRead = min(len(out), int(w)-int(r))
-		} else {
-			// Read region is after write region
-			toRead = min(len(out), rb.size-int(r))
-		}
-
-		if toRead == 0 {
-			break
-		}
-
-		copy(out, rb.buf[r:r+int32(toRead)])
-		newR := (r + int32(toRead)) % int32(rb.size)
-		atomic.StoreInt32(&rb.r, newR)
-		atomic.AddInt32(&rb.count, int32(-toRead))
-
-		out = out[toRead:]
-		total += toRead
+	if n == 0 {
+		closed := atomic.LoadInt32(&rb.closed) == 1
+		return 0, closed
 	}
 
-	closed := atomic.LoadInt32(&rb.closed) == 1 && atomic.LoadInt32(&rb.count) == 0
-	return total, closed
+	pos := r % rb.size
+	first := min(n, rb.size-pos)
+	copy(out[:first], rb.buf[pos:pos+first])
+	if first < n {
+		copy(out[first:n], rb.buf[0:n-first])
+	}
+
+	atomic.StoreInt64(&rb.r, r+n)
+	closed := atomic.LoadInt32(&rb.closed) == 1 && (r+n) == atomic.LoadInt64(&rb.w)
+	return int(n), closed
 }
 
-// Length returns the current data length in the buffer
+// Length returns the number of unread bytes in the buffer.
 func (rb *RingBuffer) Length() int {
-	return int(atomic.LoadInt32(&rb.count))
+	w := atomic.LoadInt64(&rb.w)
+	r := atomic.LoadInt64(&rb.r)
+	return int(w - r)
 }
 
-// Close closes the buffer
+// Close marks the buffer as closed. Subsequent writes return 0.
+// Reads continue to drain remaining data.
 func (rb *RingBuffer) Close() {
 	atomic.StoreInt32(&rb.closed, 1)
 }
 
-// IsClosed checks if the buffer is closed
+// IsClosed reports whether the buffer has been closed.
 func (rb *RingBuffer) IsClosed() bool {
 	return atomic.LoadInt32(&rb.closed) == 1
 }
 
-// IsEmpty checks if the buffer is empty
+// IsEmpty reports whether there is no unread data.
 func (rb *RingBuffer) IsEmpty() bool {
-	return atomic.LoadInt32(&rb.count) == 0
+	return rb.Length() == 0
 }
 
-// Clear clears all data in the buffer
+// Clear discards all unread data by advancing the read cursor to the
+// current write cursor. Safe to call from the consumer side.
 func (rb *RingBuffer) Clear() {
-	atomic.StoreInt32(&rb.r, 0)
-	atomic.StoreInt32(&rb.w, 0)
-	atomic.StoreInt32(&rb.count, 0)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	w := atomic.LoadInt64(&rb.w)
+	atomic.StoreInt64(&rb.r, w)
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"websocket_client_chat/internal/audio"
@@ -28,8 +27,8 @@ type App struct {
 	stdinMonitor *control.StdinMonitor
 
 	// State management
-	updateFlag  int32 // Update response flag
-	enableDebug bool  // Debug mode switch
+	updateCh    chan struct{} // Signals config update response received
+	enableDebug bool          // Debug mode switch
 
 	// Context control
 	ctx    context.Context
@@ -46,19 +45,20 @@ func NewApp() *App {
 		config:      cfg,
 		ctx:         ctx,
 		cancel:      cancel,
+		updateCh:    make(chan struct{}, 1),
 		enableDebug: cfg.EnableDebug,
 	}
 
 	// Initialize components
 	app.recorder = audio.NewRecorder(&cfg.Audio, app, cfg.EnableDebug)
-	app.player = audio.NewPlayer(&cfg.Audio, cfg.EnableDebug)
-	app.wsClient = websocket.NewClient(&cfg.WebSocket, app, cfg.EnableDebug)
+	app.player = audio.NewPlayer(ctx, &cfg.Audio, cfg.EnableDebug)
+	app.wsClient = websocket.NewClient(ctx, &cfg.WebSocket, app, cfg.EnableDebug)
 
 	// Select control mode based on configuration
 	if cfg.Control.UseStdin {
-		app.stdinMonitor = control.NewStdinMonitor(&cfg.Control, app)
+		app.stdinMonitor = control.NewStdinMonitor(ctx, &cfg.Control, app)
 	} else {
-		app.fileMonitor = control.NewFileMonitor(&cfg.Control, app)
+		app.fileMonitor = control.NewFileMonitor(ctx, &cfg.Control, app)
 	}
 
 	return app
@@ -193,10 +193,14 @@ func (app *App) HandleCommand(cmd control.Command) {
 				log.Printf("Test recording failed: %v", err)
 			}
 		}()
+
+	case control.CmdQuit:
+		log.Println("Quit command received, shutting down...")
+		app.cancel()
 	}
 }
 
-// === Implementation of audio.AudioHandler interface ===
+// === Implementation of audio.Handler interface ===
 
 // OnAudioChunk handles audio chunks
 func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
@@ -242,7 +246,7 @@ func (app *App) OnRecordingComplete(requestID string, _ []int16) {
 func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamResponse) {
 	if app.enableDebug {
 		log.Printf("Received audio stream response: ID=%s, ConversationID=%s, ChatID=%s",
-			resp.ID, resp.Data.ConversationId, resp.Data.ChatId)
+			resp.ID, resp.Data.ConversationID, resp.Data.ChatID)
 	}
 
 	audioData, err := base64.StdEncoding.DecodeString(resp.Data.Buffer)
@@ -263,7 +267,7 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteResponse) {
 	if app.enableDebug {
 		log.Printf("Audio output complete: ConversationID=%s, ChatID=%s",
-			resp.Data.ConversationId, resp.Data.ChatId)
+			resp.Data.ConversationID, resp.Data.ChatID)
 	}
 	app.player.SetAudioComplete(true)
 }
@@ -272,7 +276,7 @@ func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteRes
 func (app *App) HandleOutputTextStream(resp *websocket.OutputTextStreamResponse) {
 	if app.enableDebug && len(resp.Data.Text) > 0 {
 		log.Printf("Received valid text stream: ID=%s, Role=%s, Text=%s",
-			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+			resp.Data.ChatID, resp.Data.Role, resp.Data.Text)
 	}
 
 	// If it's a user message with text length >= 2, a new user message was sent; execute interruption logic
@@ -290,7 +294,7 @@ func (app *App) HandleOutputTextStream(resp *websocket.OutputTextStreamResponse)
 func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteResponse) {
 	if app.enableDebug {
 		log.Printf("Text output complete: ID=%s, Role=%s, Text=%s",
-			resp.Data.ChatId, resp.Data.Role, resp.Data.Text)
+			resp.Data.ChatID, resp.Data.Role, resp.Data.Text)
 	}
 }
 
@@ -298,7 +302,7 @@ func (app *App) HandleOutputTextComplete(resp *websocket.OutputTextCompleteRespo
 func (app *App) HandleChatComplete(resp *websocket.ChatCompleteResponse) {
 	if app.enableDebug {
 		log.Printf("Chat complete: ID=%s, Success=%v, Message=%s",
-			resp.Data.ChatId, resp.Success, resp.Message)
+			resp.Data.ChatID, resp.Success, resp.Message)
 	}
 
 	if !resp.Success {
@@ -313,7 +317,11 @@ func (app *App) HandleUpdateConfig(resp *websocket.UpdateConfigResponse) {
 	if app.enableDebug {
 		log.Printf("Received config update response: Success=%v, Message=%s", resp.Success, resp.Message)
 	}
-	atomic.StoreInt32(&app.updateFlag, 1)
+	// Non-blocking send; if nobody is waiting, the signal is dropped.
+	select {
+	case app.updateCh <- struct{}{}:
+	default:
+	}
 }
 
 // sendUpdateConfigAndWait sends a config update request and waits for response
@@ -327,17 +335,14 @@ func (app *App) sendUpdateConfigAndWait(requestID string) {
 		log.Println("Update request sent")
 	}
 
-	// Wait for flag update
-	for atomic.LoadInt32(&app.updateFlag) == 0 {
-		select {
-		case <-app.ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-			// Continue waiting
-		}
+	// Wait for update response or context cancellation
+	select {
+	case <-app.updateCh:
+		// Response received
+	case <-app.ctx.Done():
+		return
 	}
 
-	atomic.StoreInt32(&app.updateFlag, 0)
 	if app.enableDebug {
 		log.Println("Update response successful, starting streaming audio transmission")
 	}

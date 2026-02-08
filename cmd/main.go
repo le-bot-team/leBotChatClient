@@ -21,17 +21,16 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Wait for exit signal or application to finish
+	doneCh := make(chan struct{})
+	go func() {
+		app.Wait()
+		close(doneCh)
+	}()
+
 	select {
 	case sig := <-sigChan:
 		log.Printf("Received exit signal: %v", sig)
-	case <-func() <-chan struct{} {
-		ch := make(chan struct{})
-		go func() {
-			app.Wait()
-			close(ch)
-		}()
-		return ch
-	}():
+	case <-doneCh:
 		log.Println("Application terminated voluntarily")
 	}
 

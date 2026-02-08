@@ -23,8 +23,8 @@ type OutputAudioStreamResponse struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
 	Data   struct {
-		ChatId         string `json:"chatId"`
-		ConversationId string `json:"conversationId"`
+		ChatID         string `json:"chatId"`
+		ConversationID string `json:"conversationId"`
 		Buffer         string `json:"buffer"`
 	} `json:"data"`
 }
@@ -34,8 +34,8 @@ type OutputAudioCompleteResponse struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
 	Data   struct {
-		ChatId         string `json:"chatId"`
-		ConversationId string `json:"conversationId"`
+		ChatID         string `json:"chatId"`
+		ConversationID string `json:"conversationId"`
 	} `json:"data"`
 }
 
@@ -45,8 +45,8 @@ type OutputTextStreamResponse struct {
 	Action  string `json:"action"`
 	Success bool   `json:"success"`
 	Data    struct {
-		ChatId         string `json:"chatId"`
-		ConversationId string `json:"conversationId"`
+		ChatID         string `json:"chatId"`
+		ConversationID string `json:"conversationId"`
 		Role           string `json:"role"` // "assistant" or "user"
 		Text           string `json:"text"`
 	} `json:"data"`
@@ -58,8 +58,8 @@ type OutputTextCompleteResponse struct {
 	Action  string `json:"action"`
 	Success bool   `json:"success"`
 	Data    struct {
-		ChatId         string `json:"chatId"`
-		ConversationId string `json:"conversationId"`
+		ChatID         string `json:"chatId"`
+		ConversationID string `json:"conversationId"`
 		Role           string `json:"role"` // "assistant" or "user"
 		Text           string `json:"text"`
 	} `json:"data"`
@@ -72,8 +72,8 @@ type ChatCompleteResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		ChatId         string `json:"chatId"`
-		ConversationId string `json:"conversationId"`
+		ChatID         string `json:"chatId"`
+		ConversationID string `json:"conversationId"`
 		CreatedAt      int64  `json:"createdAt"`
 		CompletedAt    int64  `json:"completedAt"`
 		Errors         []struct {
@@ -107,7 +107,7 @@ type UpdateConfigRequest struct {
 	Data   struct {
 		ConversationId string `json:"conversationId"`
 		SpeechRate     int    `json:"speechRate"`
-		VoiceId        string `json:"voiceId"`
+		VoiceID        string `json:"voiceId"`
 		OutputText     bool   `json:"outputText"`
 		Location       struct {
 			Latitude  float64 `json:"latitude"`
