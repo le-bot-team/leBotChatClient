@@ -206,7 +206,10 @@ func (c *Client) connect() error {
 	// Set connection parameters
 	conn.SetReadLimit(c.config.MaxMessageSize)
 	if err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout)); err != nil {
-		conn.Close()
+		err := conn.Close()
+		if err != nil {
+			return err
+		}
 		return fmt.Errorf("failed to set read deadline: %w", err)
 	}
 	conn.SetPongHandler(func(string) error {

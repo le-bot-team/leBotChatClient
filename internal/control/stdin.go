@@ -7,13 +7,10 @@ import (
 	"log"
 	"os"
 	"strings"
-
-	"websocket_client_chat/internal/config"
 )
 
 // StdinMonitor is the stdin monitor (for debugging)
 type StdinMonitor struct {
-	config  *config.ControlConfig
 	handler Handler
 
 	ctx    context.Context
@@ -21,11 +18,10 @@ type StdinMonitor struct {
 }
 
 // NewStdinMonitor creates a new stdin monitor
-func NewStdinMonitor(parentCtx context.Context, cfg *config.ControlConfig, handler Handler) *StdinMonitor {
+func NewStdinMonitor(parentCtx context.Context, handler Handler) *StdinMonitor {
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	return &StdinMonitor{
-		config:  cfg,
 		handler: handler,
 		ctx:     ctx,
 		cancel:  cancel,

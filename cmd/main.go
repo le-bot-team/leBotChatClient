@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -8,8 +9,12 @@ import (
 )
 
 func main() {
+	// Parse command-line flags
+	controlMode := flag.String("mode", "stdin", "Control mode: stdin or file")
+	flag.Parse()
+
 	// Create application instance
-	app := NewApp()
+	app := NewApp(*controlMode)
 
 	// Start application
 	if err := app.Start(); err != nil {

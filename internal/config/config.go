@@ -46,10 +46,8 @@ type WebSocketConfig struct {
 
 // ControlConfig is the control configuration
 type ControlConfig struct {
-	FilePath      string        `json:"filePath"`
-	MonitorDelay  time.Duration `json:"monitorDelay"`
-	ChannelBuffer int           `json:"channelBuffer"`
-	UseStdin      bool          `json:"useStdin"` // Use stdin control (debug mode)
+	FilePath     string        `json:"filePath"`
+	MonitorDelay time.Duration `json:"monitorDelay"`
 }
 
 // DeviceConfig is the device configuration
@@ -108,10 +106,8 @@ func DefaultConfig() *Config {
 			MaxMessageSize: 1024 * 1024, // 1MB
 		},
 		Control: ControlConfig{
-			FilePath:      "/tmp/chat-control",
-			MonitorDelay:  100 * time.Millisecond,
-			UseStdin:      true, // Default to stdin (debug mode)
-			ChannelBuffer: 1,
+			FilePath:     "/tmp/chat-control",
+			MonitorDelay: 100 * time.Millisecond,
 		},
 		Device: DeviceConfig{
 			SerialNumber: "DEV-001",

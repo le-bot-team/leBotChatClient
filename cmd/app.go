@@ -29,6 +29,7 @@ type App struct {
 	// State management
 	updateCh    chan struct{} // Signals config update response received
 	enableDebug bool          // Debug mode switch
+	controlMode string        // Control mode: "stdin" or "file"
 
 	// Context control
 	ctx    context.Context
@@ -37,7 +38,7 @@ type App struct {
 }
 
 // NewApp creates a new application instance
-func NewApp() *App {
+func NewApp(controlMode string) *App {
 	cfg := config.DefaultConfig()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -47,6 +48,7 @@ func NewApp() *App {
 		cancel:      cancel,
 		updateCh:    make(chan struct{}, 1),
 		enableDebug: cfg.EnableDebug,
+		controlMode: controlMode,
 	}
 
 	// Initialize components
@@ -54,9 +56,9 @@ func NewApp() *App {
 	app.player = audio.NewPlayer(ctx, &cfg.Audio, cfg.EnableDebug)
 	app.wsClient = websocket.NewClient(ctx, &cfg.WebSocket, app, cfg.EnableDebug)
 
-	// Select control mode based on configuration
-	if cfg.Control.UseStdin {
-		app.stdinMonitor = control.NewStdinMonitor(ctx, &cfg.Control, app)
+	// Select control mode based on command-line argument
+	if controlMode == "stdin" {
+		app.stdinMonitor = control.NewStdinMonitor(ctx, app)
 	} else {
 		app.fileMonitor = control.NewFileMonitor(ctx, &cfg.Control, app)
 	}
@@ -77,7 +79,7 @@ func (app *App) Start() error {
 	}
 
 	// Start the corresponding control monitor
-	if app.config.Control.UseStdin {
+	if app.controlMode == "stdin" {
 		if err := app.stdinMonitor.Start(); err != nil {
 			return err
 		}
