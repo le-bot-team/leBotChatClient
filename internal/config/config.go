@@ -18,6 +18,8 @@ type Config struct {
 	Audio       AudioConfig     `json:"audio"`
 	WebSocket   WebSocketConfig `json:"websocket"`
 	Control     ControlConfig   `json:"control"`
+	Gpio        GpioConfig      `json:"gpio"`
+	Wake        WakeConfig      `json:"wake"`
 	Device      DeviceConfig    `json:"device"`
 	EnableDebug bool            `json:"enableDebug"` // Global debug switch
 }
@@ -48,6 +50,21 @@ type WebSocketConfig struct {
 type ControlConfig struct {
 	FilePath     string        `json:"filePath"`
 	MonitorDelay time.Duration `json:"monitorDelay"`
+}
+
+// GpioConfig is the GPIO configuration
+type GpioConfig struct {
+	PinNumber    int           `json:"pinNumber"`    // GPIO pin number (e.g. 200 = PG8)
+	PollInterval time.Duration `json:"pollInterval"` // Polling interval for GPIO value
+}
+
+// WakeConfig is the wake/sleep state configuration
+type WakeConfig struct {
+	BufferDuration       time.Duration `json:"bufferDuration"`       // Circular wake buffer duration (e.g. 8s)
+	SilenceCheckInterval time.Duration `json:"silenceCheckInterval"` // How often to check for silence in active state
+	SilenceThresholdRMS  float64       `json:"silenceThresholdRms"`  // RMS threshold for silence detection
+	SilenceRatio         float64       `json:"silenceRatio"`         // Ratio of silent samples to consider as silence
+	SilenceBufferSeconds int           `json:"silenceBufferSeconds"` // Seconds of audio to keep for silence checking
 }
 
 // DeviceConfig is the device configuration
@@ -108,6 +125,17 @@ func DefaultConfig() *Config {
 		Control: ControlConfig{
 			FilePath:     "/tmp/chat-control",
 			MonitorDelay: 100 * time.Millisecond,
+		},
+		Gpio: GpioConfig{
+			PinNumber:    200,
+			PollInterval: 100 * time.Millisecond,
+		},
+		Wake: WakeConfig{
+			BufferDuration:       8 * time.Second,
+			SilenceCheckInterval: 2 * time.Second,
+			SilenceThresholdRMS:  200.0,
+			SilenceRatio:         0.95,
+			SilenceBufferSeconds: 3,
 		},
 		Device: DeviceConfig{
 			SerialNumber: "DEV-001",

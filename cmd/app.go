@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"websocket_client_chat/internal/audio"
@@ -13,6 +14,14 @@ import (
 	"websocket_client_chat/internal/control"
 	"websocket_client_chat/internal/websocket"
 	"websocket_client_chat/pkg/utils"
+)
+
+// AppState represents the program state in GPIO mode
+type AppState int32
+
+const (
+	StateSleeping AppState = 0 // Default: buffering audio to circular wake buffer
+	StateActive   AppState = 1 // Actively streaming audio to backend
 )
 
 // App is the main application structure
@@ -25,11 +34,23 @@ type App struct {
 	wsClient     *websocket.Client
 	fileMonitor  *control.FileMonitor
 	stdinMonitor *control.StdinMonitor
+	gpioMonitor  *control.GpioMonitor
 
 	// State management
 	updateCh    chan struct{} // Signals config update response received
 	enableDebug bool          // Debug mode switch
-	controlMode string        // Control mode: "stdin" or "file"
+	controlMode string        // Control mode: "stdin", "file", or "gpio"
+
+	// GPIO mode state
+	state              atomic.Int32 // Current state (StateSleeping or StateActive)
+	currentRequestID   string       // Active session request ID
+	requestIDMutex     sync.RWMutex
+	wakeBuffer         []int16    // Circular buffer for wake audio
+	wakeBufferMutex    sync.Mutex // Protects wakeBuffer
+	wakeBufferMaxSize  int        // Max samples in wake buffer
+	silenceBuffer      []int16    // Buffer for silence detection
+	silenceBufferMutex sync.Mutex // Protects silenceBuffer
+	silenceBufferSize  int        // Max samples in silence buffer
 
 	// Context control
 	ctx    context.Context
@@ -51,15 +72,29 @@ func NewApp(controlMode string) *App {
 		controlMode: controlMode,
 	}
 
+	// Initialize GPIO mode buffers
+	if controlMode == "gpio" {
+		// Wake buffer: bufferDuration seconds of audio at output sample rate
+		app.wakeBufferMaxSize = int(cfg.Wake.BufferDuration.Seconds()) * cfg.Audio.SampleRate
+		app.wakeBuffer = make([]int16, 0, app.wakeBufferMaxSize)
+
+		// Silence buffer: configured seconds of audio at output sample rate
+		app.silenceBufferSize = cfg.Wake.SilenceBufferSeconds * cfg.Audio.SampleRate
+		app.silenceBuffer = make([]int16, 0, app.silenceBufferSize)
+	}
+
 	// Initialize components
 	app.recorder = audio.NewRecorder(&cfg.Audio, app, cfg.EnableDebug)
 	app.player = audio.NewPlayer(ctx, &cfg.Audio, cfg.EnableDebug)
 	app.wsClient = websocket.NewClient(ctx, &cfg.WebSocket, app, cfg.EnableDebug)
 
 	// Select control mode based on command-line argument
-	if controlMode == "stdin" {
+	switch controlMode {
+	case "gpio":
+		app.gpioMonitor = control.NewGpioMonitor(ctx, &cfg.Gpio, app)
+	case "stdin":
 		app.stdinMonitor = control.NewStdinMonitor(ctx, app)
-	} else {
+	default:
 		app.fileMonitor = control.NewFileMonitor(ctx, &cfg.Control, app)
 	}
 
@@ -78,8 +113,30 @@ func (app *App) Start() error {
 		return err
 	}
 
-	// Start the corresponding control monitor
-	if app.controlMode == "stdin" {
+	// Start the corresponding control mode
+	switch app.controlMode {
+	case "gpio":
+		// GPIO mode: start continuous recording immediately, then GPIO monitor
+		if err := app.gpioMonitor.Start(); err != nil {
+			return fmt.Errorf("failed to start GPIO monitor: %w", err)
+		}
+
+		// Start continuous recording (state defaults to Sleeping)
+		app.state.Store(int32(StateSleeping))
+		if err := app.recorder.StartRecording("gpio-continuous"); err != nil {
+			return fmt.Errorf("failed to start continuous recording: %w", err)
+		}
+
+		// Start silence detection loop
+		app.wg.Add(1)
+		go app.silenceCheckLoop()
+
+		log.Println("Voice intercom system started successfully (GPIO mode)")
+		log.Println("State: SLEEPING - buffering audio to wake buffer")
+		log.Printf("Wake buffer: %.1f seconds, Silence check: every %v",
+			app.config.Wake.BufferDuration.Seconds(), app.config.Wake.SilenceCheckInterval)
+
+	case "stdin":
 		if err := app.stdinMonitor.Start(); err != nil {
 			return err
 		}
@@ -88,7 +145,8 @@ func (app *App) Start() error {
 		log.Println("  1 or start - start recording")
 		log.Println("  2 or stop  - stop recording and send")
 		log.Println("  q or quit  - exit program")
-	} else {
+
+	default:
 		if err := app.fileMonitor.Start(); err != nil {
 			return err
 		}
@@ -107,6 +165,12 @@ func (app *App) Stop() error {
 	app.cancel()
 
 	// Stop components
+	if app.gpioMonitor != nil {
+		if err := app.gpioMonitor.Stop(); err != nil {
+			log.Printf("Failed to stop GPIO monitor: %v", err)
+		}
+	}
+
 	if app.fileMonitor != nil {
 		if err := app.fileMonitor.Stop(); err != nil {
 			log.Printf("Failed to stop file monitor: %v", err)
@@ -145,7 +209,7 @@ func (app *App) Wait() {
 
 // === Implementation of control.Handler interface ===
 
-// HandleCommand handles control commands
+// HandleCommand handles control commands (for stdin/file modes)
 func (app *App) HandleCommand(cmd control.Command) {
 	switch cmd {
 	case control.CmdStartRecording:
@@ -202,10 +266,84 @@ func (app *App) HandleCommand(cmd control.Command) {
 	}
 }
 
+// === Implementation of control.GpioHandler interface ===
+
+// OnGpioWake is called when a falling edge is detected on the GPIO pin
+func (app *App) OnGpioWake() {
+	// Only trigger wake if currently sleeping
+	if AppState(app.state.Load()) != StateSleeping {
+		if app.enableDebug {
+			log.Println("GPIO wake ignored: already in active state")
+		}
+		return
+	}
+
+	// Check WebSocket connection
+	if !app.wsClient.IsConnected() {
+		log.Println("GPIO wake ignored: WebSocket not connected")
+		return
+	}
+
+	log.Println("GPIO wake triggered, transitioning to ACTIVE state")
+
+	// Generate a new request ID for this session
+	requestID := utils.GenerateRequestID(app.config.Device.SerialNumber)
+	app.requestIDMutex.Lock()
+	app.currentRequestID = requestID
+	app.requestIDMutex.Unlock()
+
+	// Get wake buffer contents and convert to WAV
+	app.wakeBufferMutex.Lock()
+	wakeAudio := make([]int16, len(app.wakeBuffer))
+	copy(wakeAudio, app.wakeBuffer)
+	app.wakeBufferMutex.Unlock()
+
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+
+		// Send config update and wait for acknowledgment
+		app.sendUpdateConfigAndWait(requestID)
+
+		// Send wake audio buffer to backend
+		if len(wakeAudio) > 0 {
+			wavData := app.recorder.ConvertToWAV(wakeAudio)
+			if err := app.wsClient.SendWakeAudio(requestID, wavData); err != nil {
+				log.Printf("Failed to send wake audio: %v", err)
+				return
+			}
+			if app.enableDebug {
+				log.Printf("Sent wake audio: %d samples (%.2f seconds)",
+					len(wakeAudio), float64(len(wakeAudio))/float64(app.config.Audio.SampleRate))
+			}
+		} else {
+			log.Println("Wake buffer empty, sending wake audio with no data")
+			if err := app.wsClient.SendWakeAudio(requestID, nil); err != nil {
+				log.Printf("Failed to send empty wake audio: %v", err)
+				return
+			}
+		}
+
+		// Switch to active state and clear silence buffer
+		app.silenceBufferMutex.Lock()
+		app.silenceBuffer = app.silenceBuffer[:0]
+		app.silenceBufferMutex.Unlock()
+
+		app.state.Store(int32(StateActive))
+		log.Println("State: ACTIVE - streaming audio to backend")
+	}()
+}
+
 // === Implementation of audio.Handler interface ===
 
-// OnAudioChunk handles audio chunks
+// OnAudioChunk handles audio chunks from the recorder
 func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
+	if app.controlMode == "gpio" {
+		app.handleGpioAudioChunk(samples)
+		return
+	}
+
+	// Original stdin/file mode behavior
 	wavData := app.recorder.ConvertToWAV(samples)
 
 	app.wg.Add(1)
@@ -228,7 +366,140 @@ func (app *App) OnAudioChunk(requestID string, samples []int16, isLast bool) {
 	}()
 }
 
-// OnRecordingComplete handles recording completion
+// handleGpioAudioChunk routes audio based on the current GPIO mode state
+func (app *App) handleGpioAudioChunk(samples []int16) {
+	state := AppState(app.state.Load())
+
+	switch state {
+	case StateSleeping:
+		app.appendToWakeBuffer(samples)
+
+	case StateActive:
+		// Append to silence detection buffer
+		app.appendToSilenceBuffer(samples)
+
+		// Convert to WAV and send to backend
+		app.requestIDMutex.RLock()
+		reqID := app.currentRequestID
+		app.requestIDMutex.RUnlock()
+
+		wavData := app.recorder.ConvertToWAV(samples)
+
+		app.wg.Add(1)
+		go func() {
+			defer app.wg.Done()
+			if err := app.wsClient.SendAudioStream(reqID, wavData); err != nil {
+				log.Printf("Failed to send audio stream: %v", err)
+			}
+		}()
+	}
+}
+
+// appendToWakeBuffer appends samples to the circular wake buffer, trimming old data
+func (app *App) appendToWakeBuffer(samples []int16) {
+	app.wakeBufferMutex.Lock()
+	app.wakeBuffer = append(app.wakeBuffer, samples...)
+	if len(app.wakeBuffer) > app.wakeBufferMaxSize {
+		excess := len(app.wakeBuffer) - app.wakeBufferMaxSize
+		app.wakeBuffer = app.wakeBuffer[excess:]
+	}
+	app.wakeBufferMutex.Unlock()
+}
+
+// appendToSilenceBuffer appends samples to the silence detection buffer, trimming old data
+func (app *App) appendToSilenceBuffer(samples []int16) {
+	app.silenceBufferMutex.Lock()
+	app.silenceBuffer = append(app.silenceBuffer, samples...)
+	if len(app.silenceBuffer) > app.silenceBufferSize {
+		excess := len(app.silenceBuffer) - app.silenceBufferSize
+		app.silenceBuffer = app.silenceBuffer[excess:]
+	}
+	app.silenceBufferMutex.Unlock()
+}
+
+// silenceCheckLoop periodically checks for silence in active state to trigger sleep transition
+func (app *App) silenceCheckLoop() {
+	defer app.wg.Done()
+
+	ticker := time.NewTicker(app.config.Wake.SilenceCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-app.ctx.Done():
+			return
+		case <-ticker.C:
+			if AppState(app.state.Load()) != StateActive {
+				continue
+			}
+
+			// Copy the silence buffer for checking
+			app.silenceBufferMutex.Lock()
+			bufLen := len(app.silenceBuffer)
+			bufferCopy := make([]int16, bufLen)
+			copy(bufferCopy, app.silenceBuffer)
+			app.silenceBufferMutex.Unlock()
+
+			// Need at least half the buffer filled before checking
+			if bufLen < app.silenceBufferSize/2 {
+				continue
+			}
+
+			// Check if the entire buffer is silent
+			isSilent := utils.IsSilent(
+				bufferCopy,
+				app.config.Wake.SilenceThresholdRMS,
+				app.config.Wake.SilenceRatio,
+			)
+
+			if app.enableDebug {
+				rms := utils.CalculateRMS(bufferCopy)
+				log.Printf("Silence check: RMS=%.2f, threshold=%.2f, silent=%v, samples=%d",
+					rms, app.config.Wake.SilenceThresholdRMS, isSilent, bufLen)
+			}
+
+			if isSilent {
+				app.transitionToSleeping()
+			}
+		}
+	}
+}
+
+// transitionToSleeping sends inputAudioComplete and switches state back to sleeping
+func (app *App) transitionToSleeping() {
+	log.Println("Silence detected, transitioning to SLEEPING state")
+
+	app.requestIDMutex.RLock()
+	reqID := app.currentRequestID
+	app.requestIDMutex.RUnlock()
+
+	// Send inputAudioComplete to signal end of this session's audio
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		if err := app.wsClient.SendAudioComplete(reqID, nil); err != nil {
+			log.Printf("Failed to send audio complete: %v", err)
+		} else if app.enableDebug {
+			log.Println("Sent audio complete signal")
+		}
+	}()
+
+	// Clear silence buffer
+	app.silenceBufferMutex.Lock()
+	app.silenceBuffer = app.silenceBuffer[:0]
+	app.silenceBufferMutex.Unlock()
+
+	// Clear wake buffer to start fresh
+	app.wakeBufferMutex.Lock()
+	app.wakeBuffer = app.wakeBuffer[:0]
+	app.wakeBufferMutex.Unlock()
+
+	// Switch state
+	app.state.Store(int32(StateSleeping))
+	log.Println("State: SLEEPING - buffering audio to wake buffer")
+}
+
+// OnRecordingComplete handles recording completion (for stdin/file modes)
 func (app *App) OnRecordingComplete(requestID string, _ []int16) {
 	app.wg.Add(1)
 	go func() {

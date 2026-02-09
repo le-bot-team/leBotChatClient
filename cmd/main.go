@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// Parse command-line flags
-	controlMode := flag.String("mode", "stdin", "Control mode: stdin or file")
+	controlMode := flag.String("mode", "gpio", "Control mode: gpio, stdin, or file")
 	flag.Parse()
 
 	// Create application instance

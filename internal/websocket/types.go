@@ -18,6 +18,16 @@ type InputAudioCompleteRequest struct {
 	} `json:"data"`
 }
 
+// InputWakeAudioRequest is the input wake audio request
+// Sends buffered audio from before the wake trigger to the backend
+type InputWakeAudioRequest struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Data   struct {
+		Buffer string `json:"buffer"`
+	} `json:"data"`
+}
+
 // OutputAudioStreamResponse is the output audio stream response
 type OutputAudioStreamResponse struct {
 	ID     string `json:"id"`

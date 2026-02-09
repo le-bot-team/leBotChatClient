@@ -145,6 +145,17 @@ func (c *Client) SendAudioComplete(requestID string, wavData []byte) error {
 	return c.SendMessage(msg)
 }
 
+// SendWakeAudio sends the circular wake buffer audio to the backend
+func (c *Client) SendWakeAudio(requestID string, wavData []byte) error {
+	msg := InputWakeAudioRequest{
+		ID:     requestID,
+		Action: "inputWakeAudio",
+	}
+	msg.Data.Buffer = base64.StdEncoding.EncodeToString(wavData)
+
+	return c.SendMessage(msg)
+}
+
 // SendCancelOutput sends cancel output request
 func (c *Client) SendCancelOutput(requestID string) error {
 	msg := CancelOutputRequest{
