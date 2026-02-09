@@ -40,4 +40,8 @@ ENV GOARM=7
 # Create toolchain directory
 RUN mkdir -p ${TOOLCHAIN_PATH}
 
+# Copy build scripts
+COPY build_toolchain.sh build_dependencies.sh build_app.sh /build/
+RUN chmod +x /build/*.sh
+
 CMD ["/bin/bash"]
