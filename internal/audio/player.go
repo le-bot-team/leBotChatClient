@@ -53,13 +53,13 @@ func (p *Player) Stop() error {
 
 	p.mutex.Lock()
 	if p.stream != nil {
-		stopErr := p.stream.Stop()
-		if stopErr != nil {
-			return stopErr
+		// Use Abort() instead of Stop() for faster shutdown
+		// Abort() immediately stops the stream without waiting for buffers to drain
+		if abortErr := p.stream.Abort(); abortErr != nil {
+			log.Printf("Warning: failed to abort player stream: %v", abortErr)
 		}
-		closeErr := p.stream.Close()
-		if closeErr != nil {
-			return closeErr
+		if closeErr := p.stream.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close player stream: %v", closeErr)
 		}
 		p.stream = nil
 	}
@@ -138,8 +138,19 @@ func (p *Player) playAudio() {
 		p.mutex.Lock()
 		p.isPlaying = false
 		if p.stream != nil {
-			if err := p.stream.Stop(); err != nil {
-				log.Printf("Failed to stop audio stream: %v", err)
+			// Check if context was cancelled (shutdown requested)
+			// If so, use Abort() for faster exit; otherwise use Stop() for graceful end
+			select {
+			case <-p.ctx.Done():
+				// Context cancelled - use Abort() for immediate stop
+				if err := p.stream.Abort(); err != nil {
+					log.Printf("Failed to abort audio stream: %v", err)
+				}
+			default:
+				// Normal playback end - use Stop() to drain buffers
+				if err := p.stream.Stop(); err != nil {
+					log.Printf("Failed to stop audio stream: %v", err)
+				}
 			}
 			if err := p.stream.Close(); err != nil {
 				log.Printf("Failed to close audio stream: %v", err)

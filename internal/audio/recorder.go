@@ -254,13 +254,13 @@ func (r *Recorder) findAudioDevice() error {
 func (r *Recorder) Terminate() error {
 	r.mutex.Lock()
 	if r.stream != nil {
-		stopErr := r.stream.Stop()
-		if stopErr != nil {
-			return stopErr
+		// Use Abort() instead of Stop() for faster shutdown
+		// Abort() immediately stops the stream without waiting for buffers to drain
+		if abortErr := r.stream.Abort(); abortErr != nil {
+			log.Printf("Warning: failed to abort stream: %v", abortErr)
 		}
-		closeErr := r.stream.Close()
-		if closeErr != nil {
-			return closeErr
+		if closeErr := r.stream.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close stream: %v", closeErr)
 		}
 		r.stream = nil
 	}

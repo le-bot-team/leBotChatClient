@@ -98,7 +98,7 @@ func DefaultConfig() *Config {
 	chunkByteSize := chunkSampleCount * audioChannels * bitDepth
 
 	// Read configs from environment variables
-	accessToken := getEnv("ACCESS_TOKEN", "019bf218-a79a-7000-a5d4-88f298c5f0ba")
+	accessToken := getEnv("ACCESS_TOKEN", "019c4975-07b0-7000-8405-ae2cfe3b5417")
 	enableDebug := getEnv("DEBUG", "0") == "1"
 	websocketHost := getEnv("WEBSOCKET_URL", "ws://cafuuchino.studio26f.org:10580")
 
