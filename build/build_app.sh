@@ -66,7 +66,7 @@ echo -e "${YELLOW}Downloading Go modules...${NC}"
 go mod download
 
 echo -e "${YELLOW}Starting build...${NC}"
-go build -v -ldflags="-s -w" -o ./dist/chat_client_openwrt ./cmd
+go build -v -buildvcs=false -ldflags="-s -w" -o ./dist/chat_client_openwrt ./cmd
 
 if [ -f ./dist/chat_client_openwrt ]; then
     echo ""
