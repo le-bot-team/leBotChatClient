@@ -100,7 +100,8 @@ leBotChatClient/
 │   ├── build_dependencies.sh # Dependency build script
 │   └── build_app.sh         # Application build script
 ├── build/                   # Build output directory
-│   └── chat_client_openwrt  # Cross-compiled binary
+│   ├── chat_client_openwrt   # Cross-compiled binary
+│   └── libportaudio.so.2     # PortAudio shared library
 └── ...
 ```
 

@@ -69,6 +69,13 @@ echo -e "${YELLOW}Starting build...${NC}"
 go build -v -buildvcs=false -ldflags="-s -w" -o ./dist/chat_client_openwrt ./cmd
 
 if [ -f ./dist/chat_client_openwrt ]; then
+    if [ ! -f "${TOOLCHAIN_PATH}/lib/libportaudio.so.2" ]; then
+        echo -e "${RED}Error: libportaudio.so.2 not found${NC}"
+        exit 1
+    fi
+
+    cp -f "${TOOLCHAIN_PATH}/lib/libportaudio.so.2" ./dist/
+
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}Build succeeded${NC}"
@@ -76,8 +83,10 @@ if [ -f ./dist/chat_client_openwrt ]; then
     echo ""
     file ./dist/chat_client_openwrt
     ls -lh ./dist/chat_client_openwrt
+    ls -lh ./dist/libportaudio.so.2
     echo ""
     echo -e "${GREEN}Binary path:${NC} ./dist/chat_client_openwrt"
+    echo -e "${GREEN}Library path:${NC} ./dist/libportaudio.so.2"
 else
     echo -e "${RED}Build failed${NC}"
     exit 1
