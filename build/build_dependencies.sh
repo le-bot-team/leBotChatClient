@@ -58,7 +58,7 @@ echo -e "${YELLOW}Configuring ALSA-lib...${NC}"
     --host=arm-openwrt-linux-muslgnueabi \
     --prefix="${TOOLCHAIN_PATH}" \
     --enable-shared \
-    --enable-static \
+    --disable-static \
     --disable-python \
     --disable-mixer \
     --disable-ucm \
@@ -131,7 +131,7 @@ echo -e "${YELLOW}Building PortAudio...${NC}"
 make -j$(nproc)
 make install
 
-if [ -f "${TOOLCHAIN_PATH}/lib/libportaudio.a" ] && [ -f "${TOOLCHAIN_PATH}/lib/libportaudio.so.2" ]; then
+if [ -f "${TOOLCHAIN_PATH}/lib/libportaudio.so.2" ]; then
     echo -e "${GREEN}[OK] PortAudio build succeeded${NC}"
 else
     echo -e "${RED}[FAIL] PortAudio build failed${NC}"
@@ -145,5 +145,4 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}All dependencies built${NC}"
 echo -e "${GREEN}========================================${NC}"
 ls -lh "${TOOLCHAIN_PATH}/lib/libasound.a"
-ls -lh "${TOOLCHAIN_PATH}/lib/libportaudio.a"
 ls -lh "${TOOLCHAIN_PATH}/lib/libportaudio.so.2"
