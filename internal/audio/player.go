@@ -20,8 +20,10 @@ type Player struct {
 	// Playback state
 	isPlaying     bool
 	audioComplete bool
+	interrupted   bool // Flag to signal immediate stop
 	mutex         sync.RWMutex
 	completeMutex sync.RWMutex
+	playbackWg    sync.WaitGroup // Wait group to track playback goroutine
 
 	// Playback stream
 	stream *portaudio.Stream
@@ -83,6 +85,7 @@ func (p *Player) WriteAudioData(audioData []byte) {
 			log.Println("Starting playback...")
 		}
 		p.isPlaying = true
+		p.playbackWg.Add(1)
 		go p.playAudio()
 	}
 	p.mutex.Unlock()
@@ -110,14 +113,26 @@ func (p *Player) ClearBuffer() {
 // StopPlayback immediately stops playback (for interruption)
 func (p *Player) StopPlayback() {
 	p.mutex.Lock()
+	wasPlaying := p.isPlaying
 	if p.stream != nil && p.isPlaying {
 		if p.enableDebug {
 			log.Println("Interrupting playback, stopping audio stream...")
 		}
-		// Set flag but don't close stream directly, let playAudio exit naturally
+		// Set interrupted flag to signal immediate stop in callback
+		p.interrupted = true
 		p.isPlaying = false
+
+		// Abort the stream immediately instead of waiting for graceful stop
+		if err := p.stream.Abort(); err != nil {
+			log.Printf("Failed to abort audio stream: %v", err)
+		}
 	}
 	p.mutex.Unlock()
+
+	// Wait for playback goroutine to finish if it was playing
+	if wasPlaying {
+		p.playbackWg.Wait()
+	}
 
 	// Clear buffer
 	p.ClearBuffer()
@@ -136,20 +151,24 @@ func (p *Player) IsPlaying() bool {
 func (p *Player) playAudio() {
 	defer func() {
 		p.mutex.Lock()
+		wasInterrupted := p.interrupted
 		p.isPlaying = false
+		p.interrupted = false // Reset interrupted flag
 		if p.stream != nil {
-			// Check if context was cancelled (shutdown requested)
-			// If so, use Abort() for faster exit; otherwise use Stop() for graceful end
-			select {
-			case <-p.ctx.Done():
-				// Context cancelled - use Abort() for immediate stop
-				if err := p.stream.Abort(); err != nil {
-					log.Printf("Failed to abort audio stream: %v", err)
-				}
-			default:
-				// Normal playback end - use Stop() to drain buffers
-				if err := p.stream.Stop(); err != nil {
-					log.Printf("Failed to stop audio stream: %v", err)
+			// If interrupted, stream was already aborted in StopPlayback
+			// Otherwise, stop gracefully or abort based on context
+			if !wasInterrupted {
+				select {
+				case <-p.ctx.Done():
+					// Context cancelled - use Abort() for immediate stop
+					if err := p.stream.Abort(); err != nil {
+						log.Printf("Failed to abort audio stream: %v", err)
+					}
+				default:
+					// Normal playback end - use Stop() to drain buffers
+					if err := p.stream.Stop(); err != nil {
+						log.Printf("Failed to stop audio stream: %v", err)
+					}
 				}
 			}
 			if err := p.stream.Close(); err != nil {
@@ -159,8 +178,15 @@ func (p *Player) playAudio() {
 		}
 		p.mutex.Unlock()
 
+		// Signal that playback goroutine has finished
+		p.playbackWg.Done()
+
 		if p.enableDebug {
-			log.Println("Playback ended")
+			if wasInterrupted {
+				log.Println("Playback interrupted and ended")
+			} else {
+				log.Println("Playback ended")
+			}
 		}
 	}()
 
@@ -254,7 +280,13 @@ func (p *Player) playAudio() {
 	for !shouldStop {
 		select {
 		case <-ticker.C:
-			// Continue checking stop conditions
+			// Check if interrupted
+			p.mutex.RLock()
+			interrupted := p.interrupted
+			p.mutex.RUnlock()
+			if interrupted {
+				return
+			}
 		case <-p.ctx.Done():
 			return
 		}

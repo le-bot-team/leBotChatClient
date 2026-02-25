@@ -20,8 +20,9 @@ import (
 type AppState int32
 
 const (
-	StateSleeping AppState = 0 // Default: buffering audio to circular wake buffer
-	StateActive   AppState = 1 // Actively streaming audio to backend
+	StateSleeping        AppState = 0 // Default: buffering audio to circular wake buffer
+	StateWaitingResponse AppState = 1 // Waiting for wake response audio to finish playing
+	StateActive          AppState = 2 // Actively streaming audio to backend (after wake response)
 )
 
 // App is the main application structure
@@ -42,7 +43,7 @@ type App struct {
 	controlMode string        // Control mode: "stdin", "file", or "gpio"
 
 	// GPIO mode state
-	state              atomic.Int32 // Current state (StateSleeping or StateActive)
+	state              atomic.Int32 // Current state (StateSleeping, StateWaitingResponse, or StateActive)
 	currentRequestID   string       // Active session request ID
 	requestIDMutex     sync.RWMutex
 	wakeBuffer         []int16    // Circular buffer for wake audio
@@ -270,13 +271,7 @@ func (app *App) HandleCommand(cmd control.Command) {
 
 // OnGpioWake is called when a falling edge is detected on the GPIO pin
 func (app *App) OnGpioWake() {
-	// Only trigger wake if currently sleeping
-	if AppState(app.state.Load()) != StateSleeping {
-		if app.enableDebug {
-			log.Println("GPIO wake ignored: already in active state")
-		}
-		return
-	}
+	currentState := AppState(app.state.Load())
 
 	// Check WebSocket connection
 	if !app.wsClient.IsConnected() {
@@ -284,7 +279,13 @@ func (app *App) OnGpioWake() {
 		return
 	}
 
-	log.Println("GPIO wake triggered, transitioning to ACTIVE state")
+	// If not in sleeping state, interrupt current session first
+	if currentState != StateSleeping {
+		log.Printf("GPIO wake during state %d, interrupting current session", currentState)
+		app.interruptCurrentSession()
+	}
+
+	log.Println("GPIO wake triggered, transitioning to WAITING_RESPONSE state")
 
 	// Generate a new request ID for this session
 	requestID := utils.GenerateRequestID(app.config.Device.SerialNumber)
@@ -324,14 +325,43 @@ func (app *App) OnGpioWake() {
 			}
 		}
 
-		// Switch to active state and clear silence buffer
-		app.silenceBufferMutex.Lock()
-		app.silenceBuffer = app.silenceBuffer[:0]
-		app.silenceBufferMutex.Unlock()
-
-		app.state.Store(int32(StateActive))
-		log.Println("State: ACTIVE - streaming audio to backend")
+		// Switch to waiting response state (NOT active yet)
+		// Audio will be buffered but silence detection won't trigger until playback completes
+		app.state.Store(int32(StateWaitingResponse))
+		log.Println("State: WAITING_RESPONSE - waiting for wake response audio")
 	}()
+}
+
+// interruptCurrentSession stops playback and clears buffers for a new session
+func (app *App) interruptCurrentSession() {
+	// Stop audio playback immediately
+	if app.player.IsPlaying() {
+		log.Println("Interrupting audio playback")
+		app.player.StopPlayback()
+	}
+
+	// Clear silence buffer
+	app.silenceBufferMutex.Lock()
+	app.silenceBuffer = app.silenceBuffer[:0]
+	app.silenceBufferMutex.Unlock()
+
+	// Clear wake buffer to start fresh
+	app.wakeBufferMutex.Lock()
+	app.wakeBuffer = app.wakeBuffer[:0]
+	app.wakeBufferMutex.Unlock()
+
+	// Send cancel output to backend to stop any ongoing processing
+	app.requestIDMutex.RLock()
+	reqID := app.currentRequestID
+	app.requestIDMutex.RUnlock()
+
+	if reqID != "" {
+		if err := app.wsClient.SendCancelOutput(reqID); err != nil {
+			log.Printf("Failed to send cancel output: %v", err)
+		} else if app.enableDebug {
+			log.Println("Sent cancel output to backend")
+		}
+	}
 }
 
 // === Implementation of audio.Handler interface ===
@@ -373,6 +403,22 @@ func (app *App) handleGpioAudioChunk(samples []int16) {
 	switch state {
 	case StateSleeping:
 		app.appendToWakeBuffer(samples)
+
+	case StateWaitingResponse:
+		// While waiting for response, still send audio to backend but don't check for silence
+		app.requestIDMutex.RLock()
+		reqID := app.currentRequestID
+		app.requestIDMutex.RUnlock()
+
+		wavData := app.recorder.ConvertToWAV(samples)
+
+		app.wg.Add(1)
+		go func() {
+			defer app.wg.Done()
+			if err := app.wsClient.SendAudioStream(reqID, wavData); err != nil {
+				log.Printf("Failed to send audio stream: %v", err)
+			}
+		}()
 
 	case StateActive:
 		// Append to silence detection buffer
@@ -543,6 +589,17 @@ func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteRes
 			resp.Data.ConversationID, resp.Data.ChatID)
 	}
 	app.player.SetAudioComplete(true)
+
+	// In GPIO mode, transition from WaitingResponse to Active after audio playback completes
+	if app.controlMode == "gpio" && AppState(app.state.Load()) == StateWaitingResponse {
+		// Clear silence buffer before starting silence detection
+		app.silenceBufferMutex.Lock()
+		app.silenceBuffer = app.silenceBuffer[:0]
+		app.silenceBufferMutex.Unlock()
+
+		app.state.Store(int32(StateActive))
+		log.Println("State: ACTIVE - now listening for user input")
+	}
 }
 
 // HandleOutputTextStream handles output text stream
