@@ -322,6 +322,12 @@ func (c *Client) handleMessage(message []byte) error {
 
 	// Handle different responses based on action type
 	switch baseResp.Action {
+	case "establishConnection":
+		// Connection established, no action needed
+		if c.enableDebug {
+			log.Println("WebSocket connection established with server")
+		}
+
 	case "outputAudioStream":
 		var resp OutputAudioStreamResponse
 		if err := json.Unmarshal(message, &resp); err != nil {
@@ -363,6 +369,18 @@ func (c *Client) handleMessage(message []byte) error {
 			return fmt.Errorf("failed to parse config update response: %w", err)
 		}
 		c.handler.HandleUpdateConfig(&resp)
+
+	case "cancelOutput":
+		// Cancel output acknowledged, no action needed
+		if c.enableDebug {
+			log.Println("Cancel output acknowledged by server")
+		}
+
+	case "clearContext":
+		// Clear context acknowledged, no action needed
+		if c.enableDebug {
+			log.Println("Clear context acknowledged by server")
+		}
 
 	default:
 		log.Printf("Received unhandled response type: %s", baseResp.Action)

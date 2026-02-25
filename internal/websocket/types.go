@@ -110,6 +110,23 @@ type GenericServerResponse struct {
 	Action string `json:"action"`
 }
 
+// EstablishConnectionResponse is the establish connection response
+type EstablishConnectionResponse struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+}
+
+// CancelOutputResponse is the cancel output response
+type CancelOutputResponse struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Success bool   `json:"success"`
+	Data    struct {
+		CancelType string `json:"cancelType"` // "manual" or "voice"
+	} `json:"data"`
+}
+
 // UpdateConfigRequest is the update config request
 type UpdateConfigRequest struct {
 	ID     string `json:"id"`
