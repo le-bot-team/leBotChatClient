@@ -20,7 +20,7 @@ type Player struct {
 	// Playback state
 	isPlaying     bool
 	audioComplete bool
-	interrupted   bool // Flag to signal immediate stop
+	interrupted   chan struct{} // Channel to signal immediate stop
 	mutex         sync.RWMutex
 	completeMutex sync.RWMutex
 	playbackWg    sync.WaitGroup // Wait group to track playback goroutine
@@ -85,6 +85,8 @@ func (p *Player) WriteAudioData(audioData []byte) {
 			log.Println("Starting playback...")
 		}
 		p.isPlaying = true
+		// Create interrupt channel before starting goroutine to avoid race condition
+		p.interrupted = make(chan struct{})
 		p.playbackWg.Add(1)
 		go p.playAudio()
 	}
@@ -114,17 +116,21 @@ func (p *Player) ClearBuffer() {
 func (p *Player) StopPlayback() {
 	p.mutex.Lock()
 	wasPlaying := p.isPlaying
-	if p.stream != nil && p.isPlaying {
+	if p.isPlaying {
 		if p.enableDebug {
 			log.Println("Interrupting playback, stopping audio stream...")
 		}
-		// Set interrupted flag to signal immediate stop in callback
-		p.interrupted = true
+		// Signal immediate stop via channel
+		if p.interrupted != nil {
+			close(p.interrupted)
+		}
 		p.isPlaying = false
 
-		// Abort the stream immediately instead of waiting for graceful stop
-		if err := p.stream.Abort(); err != nil {
-			log.Printf("Failed to abort audio stream: %v", err)
+		// Abort the stream immediately if it exists
+		if p.stream != nil {
+			if err := p.stream.Abort(); err != nil {
+				log.Printf("Failed to abort audio stream: %v", err)
+			}
 		}
 	}
 	p.mutex.Unlock()
@@ -149,11 +155,23 @@ func (p *Player) IsPlaying() bool {
 
 // playAudio plays audio data
 func (p *Player) playAudio() {
+	// Get the interrupt channel created by WriteAudioData
+	p.mutex.Lock()
+	interruptCh := p.interrupted
+	p.mutex.Unlock()
+
 	defer func() {
 		p.mutex.Lock()
-		wasInterrupted := p.interrupted
+		// Check if we were interrupted by seeing if channel is closed
+		wasInterrupted := false
+		select {
+		case <-interruptCh:
+			wasInterrupted = true
+		default:
+		}
+
 		p.isPlaying = false
-		p.interrupted = false // Reset interrupted flag
+		p.interrupted = nil // Clear the channel reference
 		if p.stream != nil {
 			// If interrupted, stream was already aborted in StopPlayback
 			// Otherwise, stop gracefully or abort based on context
@@ -194,6 +212,13 @@ func (p *Player) playAudio() {
 	var shouldStop bool
 	emptyCount := 0
 	lastDataTime := time.Now()
+
+	// Check if already interrupted before opening stream
+	select {
+	case <-interruptCh:
+		return
+	default:
+	}
 
 	// Open stream using callback function mode
 	var err error
@@ -259,6 +284,19 @@ func (p *Player) playAudio() {
 		return
 	}
 
+	// Check if interrupted while opening stream
+	select {
+	case <-interruptCh:
+		p.mutex.Lock()
+		if p.stream != nil {
+			p.stream.Close()
+			p.stream = nil
+		}
+		p.mutex.Unlock()
+		return
+	default:
+	}
+
 	// Start stream
 	if err := p.stream.Start(); err != nil {
 		log.Printf("Failed to start audio stream: %v", err)
@@ -279,14 +317,11 @@ func (p *Player) playAudio() {
 
 	for !shouldStop {
 		select {
+		case <-interruptCh:
+			// Interrupted - exit immediately
+			return
 		case <-ticker.C:
-			// Check if interrupted
-			p.mutex.RLock()
-			interrupted := p.interrupted
-			p.mutex.RUnlock()
-			if interrupted {
-				return
-			}
+			// Continue checking shouldStop in callback
 		case <-p.ctx.Done():
 			return
 		}
