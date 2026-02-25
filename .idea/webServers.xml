@@ -3,7 +3,7 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="39555083-d7ab-43d6-bf17-c3767bc063de" name="Tina Linux">
-        <fileTransfer accessType="SFTP" host="10.100.253.16" port="22" sshConfigId="899e249b-8149-4ae4-84bd-e35225a5c362" sshConfig="root@10.100.253.16:22 password">
+        <fileTransfer accessType="SFTP" host="10.100.252.203" port="22" sshConfigId="899e249b-8149-4ae4-84bd-e35225a5c362" sshConfig="root@10.100.252.203:22 password">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
