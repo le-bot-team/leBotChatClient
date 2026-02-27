@@ -22,6 +22,7 @@ type MessageHandler interface {
 	HandleOutputTextComplete(resp *OutputTextCompleteResponse)
 	HandleChatComplete(resp *ChatCompleteResponse)
 	HandleUpdateConfig(resp *UpdateConfigResponse)
+	HandleCancelOutput(resp *CancelOutputResponse)
 }
 
 // Client is the WebSocket client
@@ -371,10 +372,12 @@ func (c *Client) handleMessage(message []byte) error {
 		c.handler.HandleUpdateConfig(&resp)
 
 	case "cancelOutput":
-		// Cancel output acknowledged, no action needed
-		if c.enableDebug {
-			log.Println("Cancel output acknowledged by server")
+		var resp CancelOutputResponse
+		if err := json.Unmarshal(message, &resp); err != nil {
+			return fmt.Errorf("failed to parse cancel output response: %w", err)
 		}
+		log.Printf("[WsClient] Received cancelOutput from server (type: %s)", resp.Data.CancelType)
+		c.handler.HandleCancelOutput(&resp)
 
 	case "clearContext":
 		// Clear context acknowledged, no action needed

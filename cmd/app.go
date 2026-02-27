@@ -642,6 +642,19 @@ func (app *App) HandleChatComplete(resp *websocket.ChatCompleteResponse) {
 	}
 }
 
+// HandleCancelOutput handles cancel output from server (voice interrupt)
+func (app *App) HandleCancelOutput(resp *websocket.CancelOutputResponse) {
+	log.Printf("[App] Received cancelOutput from server (type: %s), stopping playback", resp.Data.CancelType)
+
+	// Stop audio playback immediately
+	if app.player.IsPlaying() {
+		app.player.StopPlayback()
+	}
+
+	// Clear audio buffer to prevent any remaining data from playing
+	app.player.ClearBuffer()
+}
+
 // HandleUpdateConfig handles update config response
 func (app *App) HandleUpdateConfig(resp *websocket.UpdateConfigResponse) {
 	if app.enableDebug {
