@@ -53,6 +53,10 @@ type App struct {
 	silenceBufferMutex sync.Mutex // Protects silenceBuffer
 	silenceBufferSize  int        // Max samples in silence buffer
 
+	// WaitingResponse timeout tracking
+	waitingResponseSince time.Time    // When we entered StateWaitingResponse after silence
+	waitingResponseMutex sync.RWMutex // Protects waitingResponseSince
+
 	// Context control
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -405,7 +409,10 @@ func (app *App) handleGpioAudioChunk(samples []int16) {
 		app.appendToWakeBuffer(samples)
 
 	case StateWaitingResponse:
-		// While waiting for response, still send audio to backend but don't check for silence
+		// While waiting for response, send audio to backend for interrupt detection
+		// AND also buffer to wake buffer for potential GPIO wake
+		app.appendToWakeBuffer(samples)
+
 		app.requestIDMutex.RLock()
 		reqID := app.currentRequestID
 		app.requestIDMutex.RUnlock()
@@ -470,12 +477,41 @@ func (app *App) silenceCheckLoop() {
 	ticker := time.NewTicker(app.config.Wake.SilenceCheckInterval)
 	defer ticker.Stop()
 
+	const waitingResponseTimeout = 30 * time.Second
+
 	for {
 		select {
 		case <-app.ctx.Done():
 			return
 		case <-ticker.C:
-			if AppState(app.state.Load()) != StateActive {
+			currentState := AppState(app.state.Load())
+
+			// Check WaitingResponse timeout: if no audio response for 30s, go to sleep
+			if currentState == StateWaitingResponse {
+				app.waitingResponseMutex.RLock()
+				since := app.waitingResponseSince
+				app.waitingResponseMutex.RUnlock()
+
+				if !since.IsZero() && !app.player.IsPlaying() && time.Since(since) > waitingResponseTimeout {
+					log.Println("WaitingResponse timeout (30s), transitioning to SLEEPING")
+
+					// Clear wake buffer to start fresh
+					app.wakeBufferMutex.Lock()
+					app.wakeBuffer = app.wakeBuffer[:0]
+					app.wakeBufferMutex.Unlock()
+
+					// Reset the timer
+					app.waitingResponseMutex.Lock()
+					app.waitingResponseSince = time.Time{}
+					app.waitingResponseMutex.Unlock()
+
+					app.state.Store(int32(StateSleeping))
+					log.Println("State: SLEEPING - buffering audio to wake buffer")
+				}
+				continue
+			}
+
+			if currentState != StateActive {
 				continue
 			}
 
@@ -511,9 +547,11 @@ func (app *App) silenceCheckLoop() {
 	}
 }
 
-// transitionToSleeping sends inputAudioComplete and switches state back to sleeping
+// transitionToSleeping sends inputAudioComplete and switches state to WaitingResponse
+// so that audio continues streaming to the backend for interrupt detection.
+// The actual transition to Sleeping happens via timeout in silenceCheckLoop.
 func (app *App) transitionToSleeping() {
-	log.Println("Silence detected, transitioning to SLEEPING state")
+	log.Println("Silence detected, transitioning to WAITING_RESPONSE state")
 
 	app.requestIDMutex.RLock()
 	reqID := app.currentRequestID
@@ -535,14 +573,14 @@ func (app *App) transitionToSleeping() {
 	app.silenceBuffer = app.silenceBuffer[:0]
 	app.silenceBufferMutex.Unlock()
 
-	// Clear wake buffer to start fresh
-	app.wakeBufferMutex.Lock()
-	app.wakeBuffer = app.wakeBuffer[:0]
-	app.wakeBufferMutex.Unlock()
+	// Record when we entered WaitingResponse for timeout tracking
+	app.waitingResponseMutex.Lock()
+	app.waitingResponseSince = time.Now()
+	app.waitingResponseMutex.Unlock()
 
-	// Switch state
-	app.state.Store(int32(StateSleeping))
-	log.Println("State: SLEEPING - buffering audio to wake buffer")
+	// Switch to WaitingResponse instead of Sleeping so audio keeps streaming to backend
+	app.state.Store(int32(StateWaitingResponse))
+	log.Println("State: WAITING_RESPONSE - audio continues streaming for interrupt detection")
 }
 
 // OnRecordingComplete handles recording completion (for stdin/file modes)
@@ -576,6 +614,14 @@ func (app *App) HandleOutputAudioStream(resp *websocket.OutputAudioStreamRespons
 
 	if app.enableDebug {
 		log.Printf("Audio data size: %d bytes", len(audioData))
+	}
+
+	// Reset WaitingResponse timer when receiving response audio
+	// This prevents timeout while audio is actively being received
+	if app.controlMode == "gpio" && AppState(app.state.Load()) == StateWaitingResponse {
+		app.waitingResponseMutex.Lock()
+		app.waitingResponseSince = time.Now()
+		app.waitingResponseMutex.Unlock()
 	}
 
 	// Write to playback buffer
