@@ -149,3 +149,14 @@ Sleeping (0) ──GPIO wake──> WaitingResponse (1) ──server responds─
 - Interface-driven design for testability (e.g., `MessageHandler`, `control.Handler`, `control.GpioHandler`, `audio.Handler`)
 - Concurrency managed via `context.Context`, `sync.Mutex`, and `sync/atomic`
 - All code, comments, and documentation in English
+
+## Maintaining This Document
+
+IMPORTANT: This `AGENTS.md` documents the architecture of all three repositories in the leBot project (leBotChatClient, le-bot-backend, le-bot-frontend). After every code change or file structure modification, check whether this document needs to be updated. Specifically:
+
+- When files or directories are added, renamed, moved, or deleted, update the **Project Structure** section
+- When the state machine, control modes, or WebSocket protocol changes, update the **Architecture & State Machine** section
+- When configuration defaults or structs change, update the **Key Configuration Defaults** section
+- When new interfaces, design patterns, or conventions are introduced, update the **Code Conventions** section
+- When build/deployment processes change, update the **Build & Deployment** section
+- When external service integrations change, update the **External Services** section
