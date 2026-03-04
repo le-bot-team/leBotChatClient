@@ -25,6 +25,20 @@ const (
 	StateActive          AppState = 2 // Actively streaming audio to backend (after wake response)
 )
 
+// String returns a human-readable name for the AppState
+func (s AppState) String() string {
+	switch s {
+	case StateSleeping:
+		return "SLEEPING"
+	case StateWaitingResponse:
+		return "WAITING_RESPONSE"
+	case StateActive:
+		return "ACTIVE"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", int32(s))
+	}
+}
+
 // App is the main application structure
 type App struct {
 	config *config.Config
@@ -137,7 +151,7 @@ func (app *App) Start() error {
 		go app.silenceCheckLoop()
 
 		log.Println("Voice intercom system started successfully (GPIO mode)")
-		log.Println("State: SLEEPING - buffering audio to wake buffer")
+		log.Printf("========== [STATE](%s) Buffering audio to wake buffer ==========", AppState(app.state.Load()))
 		log.Printf("Wake buffer: %.1f seconds, Silence check: every %v",
 			app.config.Wake.BufferDuration.Seconds(), app.config.Wake.SilenceCheckInterval)
 
@@ -289,7 +303,7 @@ func (app *App) OnGpioWake() {
 		app.interruptCurrentSession()
 	}
 
-	log.Println("GPIO wake triggered, transitioning to WAITING_RESPONSE state")
+	log.Printf("========== [STATE](%s) GPIO wake triggered, transitioning to WAITING_RESPONSE ==========", AppState(app.state.Load()))
 
 	// Generate a new request ID for this session
 	requestID := utils.GenerateRequestID(app.config.Device.SerialNumber)
@@ -332,7 +346,7 @@ func (app *App) OnGpioWake() {
 		// Switch to waiting response state (NOT active yet)
 		// Audio will be buffered but silence detection won't trigger until playback completes
 		app.state.Store(int32(StateWaitingResponse))
-		log.Println("State: WAITING_RESPONSE - waiting for wake response audio")
+		log.Printf("========== [STATE](%s) Waiting for wake response audio ==========", AppState(app.state.Load()))
 	}()
 }
 
@@ -493,7 +507,7 @@ func (app *App) silenceCheckLoop() {
 				app.waitingResponseMutex.RUnlock()
 
 				if !since.IsZero() && !app.player.IsPlaying() && time.Since(since) > waitingResponseTimeout {
-					log.Println("WaitingResponse timeout (30s), transitioning to SLEEPING")
+					log.Printf("========== [STATE](%s) WaitingResponse timeout (30s), transitioning to SLEEPING ==========", AppState(app.state.Load()))
 
 					// Clear wake buffer to start fresh
 					app.wakeBufferMutex.Lock()
@@ -506,7 +520,7 @@ func (app *App) silenceCheckLoop() {
 					app.waitingResponseMutex.Unlock()
 
 					app.state.Store(int32(StateSleeping))
-					log.Println("State: SLEEPING - buffering audio to wake buffer")
+					log.Printf("========== [STATE](%s) Buffering audio to wake buffer ==========", AppState(app.state.Load()))
 				}
 				continue
 			}
@@ -522,8 +536,11 @@ func (app *App) silenceCheckLoop() {
 			copy(bufferCopy, app.silenceBuffer)
 			app.silenceBufferMutex.Unlock()
 
-			// Need at least half the buffer filled before checking
-			if bufLen < app.silenceBufferSize/2 {
+			// Need the full buffer filled before checking (3 seconds of audio data).
+			// This provides a natural grace period after entering Active state,
+			// giving the user time to start speaking or allowing new TTS playback
+			// to begin (which raises the RMS above silence threshold).
+			if bufLen < app.silenceBufferSize {
 				continue
 			}
 
@@ -541,17 +558,17 @@ func (app *App) silenceCheckLoop() {
 			}
 
 			if isSilent {
-				app.transitionToSleeping()
+				app.transitionToWaitingResponse()
 			}
 		}
 	}
 }
 
-// transitionToSleeping sends inputAudioComplete and switches state to WaitingResponse
+// transitionToWaitingResponse sends inputAudioComplete and switches state to WaitingResponse
 // so that audio continues streaming to the backend for interrupt detection.
 // The actual transition to Sleeping happens via timeout in silenceCheckLoop.
-func (app *App) transitionToSleeping() {
-	log.Println("Silence detected, transitioning to WAITING_RESPONSE state")
+func (app *App) transitionToWaitingResponse() {
+	log.Printf("========== [STATE](%s) Silence detected, transitioning to WAITING_RESPONSE ==========", AppState(app.state.Load()))
 
 	app.requestIDMutex.RLock()
 	reqID := app.currentRequestID
@@ -580,7 +597,7 @@ func (app *App) transitionToSleeping() {
 
 	// Switch to WaitingResponse instead of Sleeping so audio keeps streaming to backend
 	app.state.Store(int32(StateWaitingResponse))
-	log.Println("State: WAITING_RESPONSE - audio continues streaming for interrupt detection")
+	log.Printf("========== [STATE](%s) Audio continues streaming for interrupt detection ==========", AppState(app.state.Load()))
 }
 
 // OnRecordingComplete handles recording completion (for stdin/file modes)
@@ -644,7 +661,7 @@ func (app *App) HandleOutputAudioComplete(resp *websocket.OutputAudioCompleteRes
 		app.silenceBufferMutex.Unlock()
 
 		app.state.Store(int32(StateActive))
-		log.Println("State: ACTIVE - now listening for user input")
+		log.Printf("========== [STATE](%s) Now listening for user input ==========", AppState(app.state.Load()))
 	}
 }
 
@@ -716,7 +733,7 @@ func (app *App) HandleCancelOutput(resp *websocket.CancelOutputResponse) {
 			app.waitingResponseMutex.Unlock()
 
 			app.state.Store(int32(StateActive))
-			log.Println("State: ACTIVE - voice interrupt detected, now listening for user input")
+			log.Printf("========== [STATE](%s) Voice interrupt detected, now listening for user input ==========", AppState(app.state.Load()))
 		}
 	}
 }
