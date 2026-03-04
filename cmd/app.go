@@ -297,9 +297,18 @@ func (app *App) OnGpioWake() {
 		return
 	}
 
+	// Capture wake buffer BEFORE interrupting the current session, because
+	// interruptCurrentSession() clears the wake buffer. During ACTIVE or
+	// WAITING_RESPONSE the wake buffer is continuously maintained, so it
+	// contains recent audio that includes the wake phrase.
+	app.wakeBufferMutex.Lock()
+	wakeAudio := make([]int16, len(app.wakeBuffer))
+	copy(wakeAudio, app.wakeBuffer)
+	app.wakeBufferMutex.Unlock()
+
 	// If not in sleeping state, interrupt current session first
 	if currentState != StateSleeping {
-		log.Printf("GPIO wake during state %d, interrupting current session", currentState)
+		log.Printf("GPIO wake during state %s, interrupting current session", currentState)
 		app.interruptCurrentSession()
 	}
 
@@ -311,12 +320,6 @@ func (app *App) OnGpioWake() {
 	app.currentRequestID = requestID
 	app.requestIDMutex.Unlock()
 
-	// Get wake buffer contents and convert to WAV
-	app.wakeBufferMutex.Lock()
-	wakeAudio := make([]int16, len(app.wakeBuffer))
-	copy(wakeAudio, app.wakeBuffer)
-	app.wakeBufferMutex.Unlock()
-
 	app.wg.Add(1)
 	go func() {
 		defer app.wg.Done()
@@ -324,7 +327,9 @@ func (app *App) OnGpioWake() {
 		// Send config update and wait for acknowledgment
 		app.sendUpdateConfigAndWait(requestID)
 
-		// Send wake audio buffer to backend
+		// Only send wake audio if the buffer has data. An empty buffer means
+		// something unexpected happened; skip the wake audio and let the
+		// backend start a fresh session via the normal audio stream path.
 		if len(wakeAudio) > 0 {
 			wavData := app.recorder.ConvertToWAV(wakeAudio)
 			if err := app.wsClient.SendWakeAudio(requestID, wavData); err != nil {
@@ -336,11 +341,7 @@ func (app *App) OnGpioWake() {
 					len(wakeAudio), float64(len(wakeAudio))/float64(app.config.Audio.SampleRate))
 			}
 		} else {
-			log.Println("Wake buffer empty, sending wake audio with no data")
-			if err := app.wsClient.SendWakeAudio(requestID, nil); err != nil {
-				log.Printf("Failed to send empty wake audio: %v", err)
-				return
-			}
+			log.Println("Wake buffer empty, skipping wake audio send")
 		}
 
 		// Switch to waiting response state (NOT active yet)
@@ -444,6 +445,9 @@ func (app *App) handleGpioAudioChunk(samples []int16) {
 	case StateActive:
 		// Append to silence detection buffer
 		app.appendToSilenceBuffer(samples)
+
+		// Also maintain wake buffer so GPIO wake during ACTIVE always has audio
+		app.appendToWakeBuffer(samples)
 
 		// Convert to WAV and send to backend
 		app.requestIDMutex.RLock()
