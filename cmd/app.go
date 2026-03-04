@@ -509,6 +509,19 @@ func (app *App) silenceCheckLoop() {
 				if !since.IsZero() && !app.player.IsPlaying() && time.Since(since) > waitingResponseTimeout {
 					log.Printf("========== [STATE](%s) WaitingResponse timeout (30s), transitioning to SLEEPING ==========", AppState(app.state.Load()))
 
+					// Send inputAudioComplete to signal end of this session's audio
+					// This is done here (not in transitionToWaitingResponse) so the backend's
+					// audio queue stays open during WAITING_RESPONSE for voice interrupt detection.
+					app.requestIDMutex.RLock()
+					reqID := app.currentRequestID
+					app.requestIDMutex.RUnlock()
+
+					if err := app.wsClient.SendAudioComplete(reqID, nil); err != nil {
+						log.Printf("Failed to send audio complete: %v", err)
+					} else if app.enableDebug {
+						log.Println("Sent audio complete signal before sleeping")
+					}
+
 					// Clear wake buffer to start fresh
 					app.wakeBufferMutex.Lock()
 					app.wakeBuffer = app.wakeBuffer[:0]
@@ -564,26 +577,11 @@ func (app *App) silenceCheckLoop() {
 	}
 }
 
-// transitionToWaitingResponse sends inputAudioComplete and switches state to WaitingResponse
-// so that audio continues streaming to the backend for interrupt detection.
-// The actual transition to Sleeping happens via timeout in silenceCheckLoop.
+// transitionToWaitingResponse switches state to WaitingResponse without sending
+// inputAudioComplete, so audio continues streaming to the backend for interrupt detection.
+// inputAudioComplete is only sent when the session truly ends (timeout -> SLEEPING).
 func (app *App) transitionToWaitingResponse() {
 	log.Printf("========== [STATE](%s) Silence detected, transitioning to WAITING_RESPONSE ==========", AppState(app.state.Load()))
-
-	app.requestIDMutex.RLock()
-	reqID := app.currentRequestID
-	app.requestIDMutex.RUnlock()
-
-	// Send inputAudioComplete to signal end of this session's audio
-	app.wg.Add(1)
-	go func() {
-		defer app.wg.Done()
-		if err := app.wsClient.SendAudioComplete(reqID, nil); err != nil {
-			log.Printf("Failed to send audio complete: %v", err)
-		} else if app.enableDebug {
-			log.Println("Sent audio complete signal")
-		}
-	}()
 
 	// Clear silence buffer
 	app.silenceBufferMutex.Lock()
