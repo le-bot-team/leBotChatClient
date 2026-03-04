@@ -102,7 +102,7 @@ export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
 echo -e "${YELLOW}Downloading PortAudio source...${NC}"
-wget "http://files.portaudio.com/archives/pa_stable_${PORTAUDIO_VERSION}.tgz"
+wget --no-check-certificate "https://files.portaudio.com/archives/pa_stable_${PORTAUDIO_VERSION}.tgz"
 tar xzf "pa_stable_${PORTAUDIO_VERSION}.tgz"
 cd portaudio
 
@@ -118,6 +118,7 @@ echo -e "${YELLOW}Configuring PortAudio...${NC}"
     --without-oss \
     --disable-shared \
     --enable-static \
+    --disable-debug-output \
     CFLAGS="-O2 -fPIC ${ALSA_CFLAGS}" \
     CPPFLAGS="${ALSA_CFLAGS}" \
     LDFLAGS="-L${TOOLCHAIN_PATH}/lib" \
@@ -131,7 +132,7 @@ echo -e "${YELLOW}Building PortAudio...${NC}"
 make -j$(nproc)
 make install
 
-if [ -f "${TOOLCHAIN_PATH}/lib/libportaudio.so.2" ]; then
+if [ -f "${TOOLCHAIN_PATH}/lib/libportaudio.a" ]; then
     echo -e "${GREEN}[OK] PortAudio build succeeded${NC}"
 else
     echo -e "${RED}[FAIL] PortAudio build failed${NC}"
@@ -145,4 +146,4 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}All dependencies built${NC}"
 echo -e "${GREEN}========================================${NC}"
 ls -lh "${TOOLCHAIN_PATH}/lib/libasound.a"
-ls -lh "${TOOLCHAIN_PATH}/lib/libportaudio.so.2"
+ls -lh "${TOOLCHAIN_PATH}/lib/libportaudio.a"

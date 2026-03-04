@@ -55,6 +55,8 @@ func (p *Player) Stop() error {
 
 	p.mutex.Lock()
 	if p.stream != nil {
+		// Suppress C library output during stream shutdown
+		restore := suppressCOutput(p.enableDebug)
 		// Use Abort() instead of Stop() for faster shutdown
 		// Abort() immediately stops the stream without waiting for buffers to drain
 		if abortErr := p.stream.Abort(); abortErr != nil {
@@ -63,6 +65,7 @@ func (p *Player) Stop() error {
 		if closeErr := p.stream.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close player stream: %v", closeErr)
 		}
+		restore()
 		p.stream = nil
 	}
 	p.mutex.Unlock()
@@ -128,9 +131,11 @@ func (p *Player) StopPlayback() {
 
 		// Abort the stream immediately if it exists
 		if p.stream != nil {
+			restore := suppressCOutput(p.enableDebug)
 			if err := p.stream.Abort(); err != nil {
 				log.Printf("Failed to abort audio stream: %v", err)
 			}
+			restore()
 		}
 	}
 	p.mutex.Unlock()
@@ -173,6 +178,8 @@ func (p *Player) playAudio() {
 		p.isPlaying = false
 		p.interrupted = nil // Clear the channel reference
 		if p.stream != nil {
+			// Suppress C library output during stream cleanup
+			restore := suppressCOutput(p.enableDebug)
 			// If interrupted, stream was already aborted in StopPlayback
 			// Otherwise, stop gracefully or abort based on context
 			if !wasInterrupted {
@@ -192,6 +199,7 @@ func (p *Player) playAudio() {
 			if err := p.stream.Close(); err != nil {
 				log.Printf("Failed to close audio stream: %v", err)
 			}
+			restore()
 			p.stream = nil
 		}
 		p.mutex.Unlock()
@@ -221,6 +229,8 @@ func (p *Player) playAudio() {
 	}
 
 	// Open stream using callback function mode
+	// Suppress C library output during stream setup
+	restore := suppressCOutput(p.enableDebug)
 	var err error
 	p.stream, err = portaudio.OpenDefaultStream(
 		0, 1, // 0 input channels, 1 output channel
@@ -278,6 +288,7 @@ func (p *Player) playAudio() {
 			}
 		},
 	)
+	restore()
 
 	if err != nil {
 		log.Printf("Failed to open audio stream: %v", err)
@@ -289,7 +300,9 @@ func (p *Player) playAudio() {
 	case <-interruptCh:
 		p.mutex.Lock()
 		if p.stream != nil {
+			restore = suppressCOutput(p.enableDebug)
 			p.stream.Close()
+			restore()
 			p.stream = nil
 		}
 		p.mutex.Unlock()
@@ -298,16 +311,20 @@ func (p *Player) playAudio() {
 	}
 
 	// Start stream
+	restore = suppressCOutput(p.enableDebug)
 	if err := p.stream.Start(); err != nil {
 		log.Printf("Failed to start audio stream: %v", err)
 		err := p.stream.Close()
 		if err != nil {
 			log.Printf("Failed to close audio stream: %v", err)
+			restore()
 			return
 		}
+		restore()
 		p.stream = nil
 		return
 	}
+	restore()
 
 	log.Println("Audio playback started...")
 

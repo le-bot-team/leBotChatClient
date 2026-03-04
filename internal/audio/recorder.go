@@ -64,6 +64,11 @@ func (r *Recorder) Initialize() error {
 		return nil
 	}
 
+	// Suppress PortAudio/ALSA C library debug output in non-debug mode
+	// (Go log output is preserved via fd redirection)
+	restore := suppressCOutput(r.enableDebug)
+	defer restore()
+
 	// Initialize PortAudio
 	if !r.isPortAudioInit {
 		if err := portaudio.Initialize(); err != nil {
@@ -252,6 +257,10 @@ func (r *Recorder) findAudioDevice() error {
 
 // Terminate terminates the audio system
 func (r *Recorder) Terminate() error {
+	// Suppress C library output during stream shutdown
+	restore := suppressCOutput(r.enableDebug)
+	defer restore()
+
 	r.mutex.Lock()
 	if r.stream != nil {
 		// Use Abort() instead of Stop() for faster shutdown
@@ -327,6 +336,9 @@ func (r *Recorder) StartRecording(requestID string) error {
 		FramesPerBuffer: 1024,
 	}
 
+	// Suppress C library output during stream setup
+	restore := suppressCOutput(r.enableDebug)
+
 	var err error
 	r.stream, err = portaudio.OpenStream(params, r.audioCallback)
 	if err != nil {
@@ -339,6 +351,7 @@ func (r *Recorder) StartRecording(requestID string) error {
 			r.stream, err = portaudio.OpenStream(params, r.audioCallback)
 		}
 		if err != nil {
+			restore()
 			return fmt.Errorf("failed to open audio stream: %w", err)
 		}
 	}
@@ -346,14 +359,16 @@ func (r *Recorder) StartRecording(requestID string) error {
 	// Record the actual sample rate in use
 	r.actualCaptureSampleRate = actualSampleRate
 
-	if err := r.stream.Start(); err != nil {
-		err := r.stream.Close()
-		if err != nil {
-			return err
+	if startErr := r.stream.Start(); startErr != nil {
+		restore()
+		closeErr := r.stream.Close()
+		if closeErr != nil {
+			return closeErr
 		}
 		r.stream = nil
-		return fmt.Errorf("failed to start recording: %w", err)
+		return fmt.Errorf("failed to start recording: %w", startErr)
 	}
+	restore()
 
 	r.isRecording = true
 	if r.enableDebug {
@@ -375,11 +390,14 @@ func (r *Recorder) StopRecording() error {
 	r.isRecording = false
 
 	if r.stream != nil {
+		restore := suppressCOutput(r.enableDebug)
 		stopErr := r.stream.Stop()
 		if stopErr != nil {
+			restore()
 			return stopErr
 		}
 		closeErr := r.stream.Close()
+		restore()
 		if closeErr != nil {
 			return closeErr
 		}
@@ -543,6 +561,7 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 	readBuffer := make([]int16, 1024*r.config.Channels) // Buffer for Read()
 
 	// Create audio stream (using blocking read)
+	restore := suppressCOutput(r.enableDebug)
 	stream, err := portaudio.OpenStream(streamParams, &readBuffer)
 	if err != nil {
 		// Try using device default sample rate
@@ -556,22 +575,27 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 			stream, err = portaudio.OpenStream(streamParams, &readBuffer)
 		}
 		if err != nil {
+			restore()
 			return fmt.Errorf("failed to open audio stream: %w", err)
 		}
 	}
 	defer func() {
+		restore := suppressCOutput(r.enableDebug)
 		if err := stream.Close(); err != nil {
 			log.Printf("Failed to close test recording stream: %v", err)
 		}
+		restore()
 	}()
-
-	log.Printf("Test recording params: Sample rate=%d Hz, Channels=%d, Duration=%d seconds",
-		actualSampleRate, r.config.Channels, duration)
 
 	// Start recording
 	if err := stream.Start(); err != nil {
+		restore()
 		return fmt.Errorf("failed to start audio stream: %w", err)
 	}
+	restore()
+
+	log.Printf("Test recording params: Sample rate=%d Hz, Channels=%d, Duration=%d seconds",
+		actualSampleRate, r.config.Channels, duration)
 
 	log.Printf("Recording...")
 	startTime := time.Now()
@@ -633,9 +657,11 @@ func (r *Recorder) TestRecording(duration int, filename string) error {
 		actualDuration.Seconds(), readCount, readsNeeded, totalRead, totalSamplesNeeded)
 
 	// Stop recording
+	restore = suppressCOutput(r.enableDebug)
 	if err := stream.Stop(); err != nil {
 		log.Printf("Stop audio stream warning: %v", err)
 	}
+	restore()
 
 	recordedSamples := testBuffer
 
