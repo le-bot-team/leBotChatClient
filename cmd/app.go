@@ -699,6 +699,26 @@ func (app *App) HandleCancelOutput(resp *websocket.CancelOutputResponse) {
 
 	// Clear audio buffer to prevent any remaining data from playing
 	app.player.ClearBuffer()
+
+	// In GPIO mode, a voice-type cancel means the server detected user speech.
+	// Transition to Active so silence detection can properly end the session
+	// instead of relying on the 30s WaitingResponse timeout.
+	if app.controlMode == "gpio" && resp.Data.CancelType == "voice" {
+		if AppState(app.state.Load()) == StateWaitingResponse {
+			// Clear silence buffer to start fresh for the new active session
+			app.silenceBufferMutex.Lock()
+			app.silenceBuffer = app.silenceBuffer[:0]
+			app.silenceBufferMutex.Unlock()
+
+			// Reset waiting response timer since we're leaving that state
+			app.waitingResponseMutex.Lock()
+			app.waitingResponseSince = time.Time{}
+			app.waitingResponseMutex.Unlock()
+
+			app.state.Store(int32(StateActive))
+			log.Println("State: ACTIVE - voice interrupt detected, now listening for user input")
+		}
+	}
 }
 
 // HandleUpdateConfig handles update config response
