@@ -6,7 +6,7 @@ This is the **leBotChatClient** repository, one of three repositories in the "le
 
 | Repository | Description | Tech Stack |
 |---|---|---|
-| **leBotChatClient** (this repo) | Embedded voice chat client running on the robot | Go 1.21, PortAudio, gorilla/websocket |
+| **leBotChatClient** (this repo) | Embedded voice chat client running on the robot | Go 1.21, PortAudio, gorilla/websocket, BurntSushi/toml |
 | **le-bot-backend** | Backend server interfacing with both this client and the web frontend | - |
 | **le-bot-frontend** | Web frontend for device management, user management, and data analytics | - |
 
@@ -33,7 +33,8 @@ leBotChatClient/
 │   └── app.go                  # Core application logic, state machine, MessageHandler impl
 ├── internal/                   # Internal packages
 │   ├── config/
-│   │   └── config.go           # Config structs and defaults (env: ACCESS_TOKEN, DEBUG, WEBSOCKET_URL)
+│   │   ├── config.go           # Config structs and defaults (reads config.toml via BurntSushi/toml)
+│   │   └── config.toml         # TOML config file (access_token, debug, websocket_url)
 │   ├── websocket/
 │   │   ├── client.go           # WebSocket client with auto-reconnect, heartbeat, message routing
 │   │   └── types.go            # Request/response type definitions for all WebSocket actions
@@ -126,7 +127,8 @@ Sleeping (0) ──GPIO wake──> WaitingResponse (1) ──server responds─
 - **Cross-compilation**: ARM v7 target via Docker (see `compose.yaml`)
 - **Build command**: `docker compose run builder` or use the dev container
 - **Environment variables**: `CGO_ENABLED=1`, `GOOS=linux`, `GOARCH=arm`, `GOARM=7`
-- **Debug mode**: Set `DEBUG=1` environment variable for verbose logging
+- **Configuration**: Place `config.toml` next to the executable or in the working directory (see `internal/config/config.toml` for format)
+- **Debug mode**: Set `debug = true` in `config.toml` for verbose logging
 
 ## Key Configuration Defaults
 

@@ -2,15 +2,47 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
+// fileConfig holds values loaded from config.toml
+type fileConfig struct {
+	AccessToken  string `toml:"access_token"`
+	Debug        bool   `toml:"debug"`
+	WebsocketURL string `toml:"websocket_url"`
+}
+
+// loadFileConfig reads config.toml from the executable's directory or CWD.
+// If neither location has a config.toml, defaults are returned.
+func loadFileConfig() fileConfig {
+	cfg := fileConfig{
+		AccessToken:  "019cb9c7-4e91-7000-aa0b-a06b6f9b475a",
+		Debug:        false,
+		WebsocketURL: "ws://cafuuchino.studio26f.org:10580",
 	}
-	return fallback
+
+	// Try config.toml next to the executable
+	if exePath, err := os.Executable(); err == nil {
+		tomlPath := filepath.Join(filepath.Dir(exePath), "config.toml")
+		if _, err := toml.DecodeFile(tomlPath, &cfg); err == nil {
+			log.Printf("[Config] Loaded config from %s", tomlPath)
+			return cfg
+		}
+	}
+
+	// Try config.toml in the current working directory
+	if _, err := toml.DecodeFile("config.toml", &cfg); err == nil {
+		log.Printf("[Config] Loaded config from config.toml (CWD)")
+		return cfg
+	}
+
+	log.Println("[Config] No config.toml found, using defaults")
+	return cfg
 }
 
 // Config is the application configuration
@@ -97,10 +129,11 @@ func DefaultConfig() *Config {
 	chunkSampleCount := int(outputSampleRate * chunkDuration / time.Second)
 	chunkByteSize := chunkSampleCount * audioChannels * bitDepth
 
-	// Read configs from environment variables
-	accessToken := getEnv("ACCESS_TOKEN", "019c4975-07b0-7000-8405-ae2cfe3b5417")
-	enableDebug := getEnv("DEBUG", "0") == "1"
-	websocketHost := getEnv("WEBSOCKET_URL", "ws://cafuuchino.studio26f.org:10580")
+	// Read configs from config.toml
+	fileCfg := loadFileConfig()
+	accessToken := fileCfg.AccessToken
+	enableDebug := fileCfg.Debug
+	websocketHost := fileCfg.WebsocketURL
 
 	return &Config{
 		EnableDebug: enableDebug, // Global debug switch
