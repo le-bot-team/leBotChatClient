@@ -32,6 +32,11 @@ type Client struct {
 	handler MessageHandler
 	mutex   sync.RWMutex
 
+	// writeMutex serializes all WebSocket write operations. gorilla/websocket
+	// supports only one concurrent writer, so every call to WriteMessage (data
+	// and control frames alike) must be protected by this mutex.
+	writeMutex sync.Mutex
+
 	// Channels and context
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -78,7 +83,8 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// SendMessage sends a message
+// SendMessage sends a message. All writes are serialized through writeMutex
+// because gorilla/websocket only supports one concurrent writer.
 func (c *Client) SendMessage(message interface{}) error {
 	c.mutex.RLock()
 	conn := c.conn
@@ -92,6 +98,9 @@ func (c *Client) SendMessage(message interface{}) error {
 	if err != nil {
 		return fmt.Errorf("json encoding failed: %w", err)
 	}
+
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
 
 	if err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); err != nil {
 		return fmt.Errorf("failed to set write deadline: %w", err)
@@ -301,14 +310,18 @@ func (c *Client) pingLoop() {
 				return
 			}
 
+			c.writeMutex.Lock()
 			if err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); err != nil {
+				c.writeMutex.Unlock()
 				return
 			}
 
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				c.writeMutex.Unlock()
 				log.Printf("Failed to send ping: %v", err)
 				return
 			}
+			c.writeMutex.Unlock()
 		}
 	}
 }

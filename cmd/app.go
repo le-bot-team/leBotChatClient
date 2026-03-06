@@ -351,7 +351,9 @@ func (app *App) OnGpioWake() {
 	}()
 }
 
-// interruptCurrentSession stops playback and clears buffers for a new session
+// interruptCurrentSession stops playback and clears buffers for a new session.
+// It also enforces a cooldown after sending cancelOutput so the backend has time
+// to finish cleanup before the next session's messages arrive.
 func (app *App) interruptCurrentSession() {
 	// Stop audio playback immediately
 	if app.player.IsPlaying() {
@@ -377,8 +379,17 @@ func (app *App) interruptCurrentSession() {
 	if reqID != "" {
 		if err := app.wsClient.SendCancelOutput(reqID); err != nil {
 			log.Printf("Failed to send cancel output: %v", err)
-		} else if app.enableDebug {
-			log.Println("Sent cancel output to backend")
+		} else {
+			if app.enableDebug {
+				log.Println("Sent cancel output to backend")
+			}
+			// Wait for the backend to finish processing the cancel before
+			// allowing a new session to start. Without this cooldown the new
+			// session's ASR connection can be torn down by the backend's
+			// still-in-progress cancel cleanup (the "abort all" path).
+			if app.config.Wake.CancelCooldown > 0 {
+				time.Sleep(app.config.Wake.CancelCooldown)
+			}
 		}
 	}
 }

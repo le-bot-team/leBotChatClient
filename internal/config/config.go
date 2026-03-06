@@ -97,6 +97,7 @@ type WakeConfig struct {
 	SilenceThresholdRMS  float64       `json:"silenceThresholdRms"`  // RMS threshold for silence detection
 	SilenceRatio         float64       `json:"silenceRatio"`         // Ratio of silent samples to consider as silence
 	SilenceBufferSeconds int           `json:"silenceBufferSeconds"` // Seconds of audio to keep for silence checking
+	CancelCooldown       time.Duration `json:"cancelCooldown"`       // Cooldown after sending cancelOutput before starting a new session
 }
 
 // DeviceConfig is the device configuration
@@ -169,6 +170,7 @@ func DefaultConfig() *Config {
 			SilenceThresholdRMS:  200.0,
 			SilenceRatio:         0.95,
 			SilenceBufferSeconds: 3,
+			CancelCooldown:       300 * time.Millisecond,
 		},
 		Device: DeviceConfig{
 			SerialNumber: "DEV-001",
