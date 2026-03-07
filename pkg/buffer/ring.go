@@ -2,6 +2,7 @@
 package buffer
 
 import (
+	"runtime"
 	"sync/atomic"
 	"unsafe"
 )
@@ -20,9 +21,10 @@ type RingBuffer struct {
 	// r is the cumulative number of bytes read (only modified by consumer).
 	r int64
 
-	buf    []byte
-	size   int64
-	closed int32 // 1 = closed
+	buf     []byte
+	size    int64
+	closed  int32 // 1 = closed (permanent)
+	aborted int32 // 1 = aborted (resettable, breaks blocking Write)
 
 	// pad prevents false sharing between w and r on separate cache lines.
 	// On ARM Cortex-A7 the cache line is 32 or 64 bytes; this is good enough.
@@ -37,39 +39,57 @@ func New(size int) *RingBuffer {
 	}
 }
 
-// Write appends data to the buffer. Returns the number of bytes written.
+// Write appends data to the buffer, blocking until all bytes are written,
+// the buffer is closed, or the buffer is aborted. Returns the total number
+// of bytes written.
 // Only safe to call from a single producer goroutine.
+//
+// When the buffer is full, Write spins with short sleeps waiting for the
+// consumer (PortAudio callback) to drain data. This keeps the reader side
+// entirely lock-free while providing back-pressure so no audio data is lost.
 func (rb *RingBuffer) Write(data []byte) int {
-	if atomic.LoadInt32(&rb.closed) == 1 {
-		return 0
+	total := 0
+	remaining := data
+
+	for len(remaining) > 0 {
+		if atomic.LoadInt32(&rb.closed) == 1 || atomic.LoadInt32(&rb.aborted) == 1 {
+			return total
+		}
+
+		r := atomic.LoadInt64(&rb.r)
+		w := rb.w // producer owns w
+
+		avail := rb.size - (w - r)
+		if avail == 0 {
+			// Buffer is full — yield and retry. A short Gosched
+			// keeps CPU usage low while the PortAudio callback drains data.
+			runtime.Gosched()
+			continue
+		}
+
+		n := int64(len(remaining))
+		if n > avail {
+			n = avail
+		}
+
+		// Write position within the circular buffer.
+		pos := w % rb.size
+		// First segment: from pos to end of buffer (or n, whichever is smaller).
+		first := min(n, rb.size-pos)
+		copy(rb.buf[pos:pos+first], remaining[:first])
+		// Second segment: wrap around to beginning.
+		if first < n {
+			copy(rb.buf[0:n-first], remaining[first:n])
+		}
+
+		// Publish the new write position.
+		atomic.StoreInt64(&rb.w, w+n)
+
+		total += int(n)
+		remaining = remaining[n:]
 	}
 
-	r := atomic.LoadInt64(&rb.r)
-	w := rb.w // producer owns w, no atomic load needed for own writes
-
-	avail := rb.size - (w - r)
-	n := int64(len(data))
-	if n > avail {
-		n = avail
-	}
-	if n == 0 {
-		return 0
-	}
-
-	// Write position within the circular buffer.
-	pos := w % rb.size
-	// First segment: from pos to end of buffer (or n, whichever is smaller).
-	first := min(n, rb.size-pos)
-	copy(rb.buf[pos:pos+first], data[:first])
-	// Second segment: wrap around to beginning.
-	if first < n {
-		copy(rb.buf[0:n-first], data[first:n])
-	}
-
-	// Publish the new write position. The store must be atomic so the
-	// consumer sees a consistent value.
-	atomic.StoreInt64(&rb.w, w+n)
-	return int(n)
+	return total
 }
 
 // Read fills out with available data. Returns the number of bytes read and
@@ -113,6 +133,19 @@ func (rb *RingBuffer) Length() int {
 // Reads continue to drain remaining data.
 func (rb *RingBuffer) Close() {
 	atomic.StoreInt32(&rb.closed, 1)
+}
+
+// Abort sets the abort flag, causing any in-progress or future Write calls to
+// return immediately. Unlike Close, Abort is resettable via ResetAbort.
+// Use this to break a blocking Write during playback interruption.
+func (rb *RingBuffer) Abort() {
+	atomic.StoreInt32(&rb.aborted, 1)
+}
+
+// ResetAbort clears the abort flag so that Write can block again.
+// Typically called after clearing the buffer to prepare for a new session.
+func (rb *RingBuffer) ResetAbort() {
+	atomic.StoreInt32(&rb.aborted, 0)
 }
 
 // IsClosed reports whether the buffer has been closed.

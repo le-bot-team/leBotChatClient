@@ -117,6 +117,12 @@ func (p *Player) ClearBuffer() {
 
 // StopPlayback immediately stops playback (for interruption)
 func (p *Player) StopPlayback() {
+	// Abort the ring buffer first to unblock any in-progress Write call.
+	// This must happen before acquiring the mutex because WriteAudioData
+	// may be blocked inside Write while holding no lock, and we need it to
+	// return so the WebSocket message loop can proceed.
+	p.audioBuffer.Abort()
+
 	p.mutex.Lock()
 	wasPlaying := p.isPlaying
 	if p.isPlaying {
@@ -145,8 +151,9 @@ func (p *Player) StopPlayback() {
 		p.playbackWg.Wait()
 	}
 
-	// Clear buffer
+	// Clear buffer and reset abort flag so future writes can proceed
 	p.ClearBuffer()
+	p.audioBuffer.ResetAbort()
 	// Reset complete flag
 	p.SetAudioComplete(false)
 }

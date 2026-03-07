@@ -2,13 +2,14 @@
 
 ## Project Overview
 
-This is the **leBotChatClient** repository, one of three repositories in the "leBot (乐宝) AI Robot" project:
+This is the **leBotChatClient** repository, one of four repositories in the "leBot (乐宝) AI Robot" project:
 
 | Repository | Description | Tech Stack |
 |---|---|---|
 | **leBotChatClient** (this repo) | Embedded voice chat client running on the robot | Go 1.21, PortAudio, gorilla/websocket, BurntSushi/toml |
-| **le-bot-backend** | Backend server interfacing with both this client and the web frontend | - |
-| **le-bot-frontend** | Web frontend for device management, user management, and data analytics | - |
+| **le-bot-backend** | Backend server interfacing with both this client and the web frontend | Bun, Elysia, TypeScript |
+| **le-bot-frontend** | Web frontend for device management, user management, and data analytics | Vue 3, Quasar |
+| **le_bot_vpr** | Voice Print Recognition microservice for speaker identification | Python 3.14, FastAPI, PyTorch, Elasticsearch |
 
 ## Hardware & Embedded Environment
 
@@ -16,6 +17,62 @@ This is the **leBotChatClient** repository, one of three repositories in the "le
 - **Architecture**: ARM v7 (linux/arm/v7), cross-compiled via Docker toolchain
 - **Audio**: PortAudio for audio capture and playback
 - **Wake Word Detection**: An embedded ASR module on the robot detects the wake phrase "你好乐宝" (Hello LeBot) and triggers a **falling edge signal on GPIO 200** (PG8)
+
+## le_bot_vpr (Voice Print Recognition Microservice)
+
+A FastAPI microservice that manages multi-tenant voiceprint registration and recognition backed by Elasticsearch vector search.
+
+### Tech Stack
+
+| Category | Technology |
+|---|---|
+| Language | Python 3.14 |
+| Web Framework | FastAPI 0.128 + Uvicorn |
+| Deep Learning | PyTorch 2.9.1 + TorchAudio 2.9.1 |
+| Speaker Embedding Model | ERes2Net (from VoiceprintRecognition-Pytorch, git submodule) |
+| Feature Extraction | Fbank (80 mel bins, 16kHz sample rate) |
+| Vector Database | Elasticsearch 9.2.4 (native kNN / HNSW) |
+
+### Speaker Embedding
+
+| Parameter | Value |
+|---|---|
+| Model Architecture | ERes2Net (Enhanced Res2Net) |
+| Embedding Dimension | 192 |
+| Inference Device | CPU (default) |
+| Audio Constraints | Min 0.3s, max 3s, 16kHz, dB normalized to -20dB |
+| Similarity Metric | Cosine similarity |
+| ANN Index | HNSW (M=16, ef_construction=100) |
+
+### Data Hierarchy: User → Person → Voice
+
+```
+User (user_id)           # Multi-tenant isolation unit; each user gets a separate ES index
+ └── Person (person_id)  # A physical person, identified by aggregating voices under same person_id
+      ├── Voice (voice_id)   # Individual voice record with 192-dim feature_vector
+      ├── Voice (voice_id)
+      └── Voice (voice_id)
+```
+
+- **User** maps to an ES index (`voice_features_user_{user_id}`), providing tenant isolation
+- **Person** is a virtual entity derived by aggregating Voice documents sharing the same `person_id`
+- **Voice** is the actual ES document storing `feature_vector`, `person_id`, `is_temporal`, `expire_date`, etc.
+- Auto-match on registration: kNN search (threshold 0.85) matches existing persons; creates new person (UUID v7) if no match
+- Temporal voices: `is_temporal=True` voices expire after 7 days with batch cleanup
+
+### Key API Endpoints
+
+Base URL: `/api/v1/vpr`
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/users/{user_id}/recognize` | Recognize speaker via kNN search, returns best matching person |
+| `POST` | `/users/{user_id}/register` | Register voice (extract embedding, auto-match or create new person) |
+| `GET` | `/users/{user_id}/persons` | List all persons under a user |
+| `DELETE` | `/users/{user_id}/persons/{person_id}` | Delete person and all voices |
+| `POST` | `/users/{user_id}/persons/{person_id}/voices/add` | Add voice to existing person |
+
+Audio input: Base64 encoded string (data URI prefix supported), max 20MB, formats: wav, mp3, m4a, ogg.
 
 ## External Services (Volcengine)
 
@@ -89,12 +146,65 @@ Sleeping (0) ──GPIO wake──> WaitingResponse (1) ──server responds─
 
 - Runs every 2 seconds during Active state
 - RMS threshold: 200.0, silence ratio: 0.95
-- 3 seconds of silence triggers transition back to Sleeping
+- 3 seconds of silence triggers transition back to WaitingResponse (NOT Sleeping)
+- `inputAudioComplete` is NOT sent on Active → WaitingResponse; audio keeps streaming for interrupt detection
+- `inputAudioComplete` is only sent on true session end (30s timeout → Sleeping)
+
+### Multi-Person Conversation Design
+
+The robot is designed for **multi-person scenarios** where different people may interact with it during a single session. Voice Print Recognition (VPR) is used to identify the current speaker and switch conversation context accordingly.
+
+#### Speaker Tracking
+
+- Each conversation turn tracks a `lastPersonId` (the person currently speaking)
+- The backend's Chat API uses `personId` to load the correct person's profile and conversation history
+- When a different person speaks, the backend updates `lastPersonId` and the Chat API switches context
+
+#### End-to-End Conversation Turn Flow (GPIO mode)
+
+A complete conversation turn consists of the following stages:
+
+```
+1. Client: GPIO wake → capture wake buffer → send inputWakeAudio to backend
+2. Backend: Receive wake audio → run ASR + VPR in parallel:
+   - ASR: Recognize wake phrase (e.g., "你好，乐宝。")
+   - VPR: Identify speaker from wake audio → set lastPersonId
+   - If VPR fails (new speaker): register new voice print (temporal)
+3. Backend: Send wake response (personalized greeting via Wake API + TTS) → stream outputAudioStream to client
+4. Client: Play wake response audio → on outputAudioComplete → transition to Active state
+5. Client (Active): Stream inputAudioStream continuously to backend
+6. Backend: ASR recognizes user speech → VPR identifies speaker → update lastPersonId if changed
+7. Backend: Send recognized text to Chat API (with personId) → receive AI response → TTS → stream outputAudioStream
+8. Client: Play response audio → on outputAudioComplete → resume listening
+9. Repeat steps 5-8 until silence detected → WaitingResponse → 30s timeout → Sleeping
+```
+
+#### Interruption Rules
+
+Interruption is only allowed under strict conditions to prevent cross-person interference:
+
+1. **Same-person interruption (voice interrupt)**:
+   - During an ongoing conversation turn (steps 6-8 above), if the backend detects a new ASR utterance
+   - VPR must verify the speaker is the **same person** (`personId` matches `lastPersonId`)
+   - If confirmed: cancel current TTS output, process new utterance immediately
+   - If different person: the interruption is **rejected**; the different person must wait
+
+2. **Wake word interruption (GPIO interrupt)**:
+   - Any person can say "你好乐宝" at any time to trigger a GPIO wake
+   - This forcefully interrupts the entire current session regardless of speaker identity
+   - Client sends `cancelOutput` → starts a completely new session from step 1
+
+3. **Person switching (between turns)**:
+   - After a complete conversation turn finishes (client finishes playing response audio)
+   - A different person can speak and will be identified by VPR
+   - The backend updates `lastPersonId` and switches Chat API context to the new person
 
 ### Smart Interruption
 
-- New user speech (detected via `outputTextComplete` with `role: "user"`, text length >= 2) stops current playback
-- GPIO wake during Active state interrupts current session
+- New user speech during Active state triggers VPR verification on the backend
+- Backend sends `outputTextStream` with `role: "user"` back to client; client stops playback if text length >= 2
+- Backend may also send `cancelOutput` with `cancelType: "voice"` to forcefully cancel output
+- GPIO wake during Active/WaitingResponse state interrupts current session via `cancelOutput` with `cancelType: "manual"`
 
 ## WebSocket Protocol
 
@@ -154,7 +264,7 @@ Sleeping (0) ──GPIO wake──> WaitingResponse (1) ──server responds─
 
 ## Maintaining This Document
 
-IMPORTANT: This `AGENTS.md` documents the architecture of all three repositories in the leBot project (leBotChatClient, le-bot-backend, le-bot-frontend). After every code change or file structure modification, check whether this document needs to be updated. Specifically:
+IMPORTANT: This `AGENTS.md` documents the architecture of all four repositories in the leBot project (leBotChatClient, le-bot-backend, le-bot-frontend, le_bot_vpr). After every code change or file structure modification, check whether this document needs to be updated. Specifically:
 
 - When files or directories are added, renamed, moved, or deleted, update the **Project Structure** section
 - When the state machine, control modes, or WebSocket protocol changes, update the **Architecture & State Machine** section
