@@ -191,24 +191,34 @@ func (c *Client) IsConnected() bool {
 	return c.conn != nil
 }
 
-// connectLoop is the connection loop
+// connectLoop is the connection loop with exponential backoff
 func (c *Client) connectLoop() {
+	currentDelay := c.config.ReconnectDelay
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
 			if err := c.connect(); err != nil {
-				log.Printf("WebSocket connection failed: %v (retrying in %.1f seconds)", err, c.config.ReconnectDelay.Seconds())
+				log.Printf("WebSocket connection failed: %v (retrying in %.1f seconds)", err, currentDelay.Seconds())
 				select {
 				case <-c.ctx.Done():
 					return
-				case <-time.After(c.config.ReconnectDelay):
+				case <-time.After(currentDelay):
+					// Exponential backoff: double the delay, capped at MaxReconnectDelay
+					currentDelay *= 2
+					if currentDelay > c.config.MaxReconnectDelay {
+						currentDelay = c.config.MaxReconnectDelay
+					}
 					continue
 				}
 			}
 
-			// Connection successful, start message loop
+			// Connection successful, reset backoff delay
+			currentDelay = c.config.ReconnectDelay
+
+			// Start message loop (blocks until disconnected)
 			c.messageLoop()
 		}
 	}

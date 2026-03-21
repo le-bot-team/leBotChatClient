@@ -70,12 +70,13 @@ type AudioConfig struct {
 
 // WebSocketConfig is the WebSocket configuration
 type WebSocketConfig struct {
-	URL            string        `json:"url"`
-	ReconnectDelay time.Duration `json:"reconnectDelay"`
-	PingInterval   time.Duration `json:"pingInterval"`
-	WriteTimeout   time.Duration `json:"writeTimeout"`
-	ReadTimeout    time.Duration `json:"readTimeout"`
-	MaxMessageSize int64         `json:"maxMessageSize"`
+	URL               string        `json:"url"`
+	ReconnectDelay    time.Duration `json:"reconnectDelay"`    // Initial reconnect delay (base for exponential backoff)
+	MaxReconnectDelay time.Duration `json:"maxReconnectDelay"` // Maximum reconnect delay cap
+	PingInterval      time.Duration `json:"pingInterval"`
+	WriteTimeout      time.Duration `json:"writeTimeout"`
+	ReadTimeout       time.Duration `json:"readTimeout"`
+	MaxMessageSize    int64         `json:"maxMessageSize"`
 }
 
 // ControlConfig is the control configuration
@@ -149,12 +150,13 @@ func DefaultConfig() *Config {
 			ChunkByteSize:     chunkByteSize,
 		},
 		WebSocket: WebSocketConfig{
-			URL:            fmt.Sprintf("%s/api/v1/chat/ws?token=%s", websocketHost, accessToken),
-			ReconnectDelay: 5 * time.Second,
-			PingInterval:   30 * time.Second,
-			WriteTimeout:   10 * time.Second,
-			ReadTimeout:    60 * time.Second,
-			MaxMessageSize: 1024 * 1024, // 1MB
+			URL:               fmt.Sprintf("%s/api/v1/chat/ws?token=%s", websocketHost, accessToken),
+			ReconnectDelay:    5 * time.Second,
+			MaxReconnectDelay: 160 * time.Second,
+			PingInterval:      30 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			MaxMessageSize:    1024 * 1024, // 1MB
 		},
 		Control: ControlConfig{
 			FilePath:     "/tmp/chat-control",
