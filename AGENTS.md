@@ -85,36 +85,42 @@ The backend uses two Volcengine (火山引擎) APIs:
 
 ```
 leBotChatClient/
-├── cmd/                        # Application entry point
-│   ├── main.go                 # CLI flag parsing (-mode gpio|stdin|file), signal handling
-│   └── app.go                  # Core application logic, state machine, MessageHandler impl
-├── internal/                   # Internal packages
+├── cmd/                            # Application entry point
+│   ├── main.go                     # CLI flag parsing (-mode gpio|stdin|file), signal handling
+│   └── app.go                      # Core application logic, state machine, MessageHandler impl
+├── internal/                       # Internal packages
 │   ├── config/
-│   │   ├── config.go           # Config structs and defaults (reads config.toml via BurntSushi/toml)
-│   │   └── config.toml         # TOML config file (access_token, debug, websocket_url)
+│   │   └── config.go               # Config structs and defaults (reads config.toml via BurntSushi/toml)
 │   ├── websocket/
-│   │   ├── client.go           # WebSocket client with auto-reconnect, heartbeat, message routing
-│   │   └── types.go            # Request/response type definitions for all WebSocket actions
+│   │   ├── client.go               # WebSocket client with auto-reconnect, heartbeat, message routing
+│   │   └── types.go                # Request/response type definitions for all WebSocket actions
 │   ├── audio/
-│   │   ├── recorder.go         # PortAudio-based streaming audio recorder
-│   │   └── player.go           # Ring buffer-based streaming audio player
+│   │   ├── recorder.go             # PortAudio-based streaming audio recorder with device priority selection
+│   │   ├── player.go               # Ring buffer-based streaming audio player with interruption support
+│   │   ├── suppress_default.go     # No-op suppressCOutput() for non-ARM/Linux builds
+│   │   └── suppress_linux_arm.go   # Suppresses ALSA/PortAudio C stderr on ARM Linux via fd redirect
 │   └── control/
-│       ├── gpio.go             # GPIO falling-edge detection for wake word trigger
-│       ├── monitor.go          # File-based control (/tmp/chat-control)
-│       └── stdin.go            # Standard input control for development
-├── pkg/                        # Public reusable packages
+│       ├── gpio.go                 # GPIO falling-edge detection for wake word trigger
+│       ├── monitor.go              # File-based control (/tmp/chat-control)
+│       └── stdin.go                # Standard input control for development
+├── pkg/                            # Public reusable packages
 │   ├── buffer/
-│   │   └── ring.go             # Thread-safe ring buffer with atomic operations
+│   │   └── ring.go                 # Lock-free SPSC ring buffer with atomic operations (ARM32-safe)
 │   └── utils/
-│       └── audio.go            # Audio utilities (IsSilent, CalculateRMS, GenerateRequestID, etc.)
-├── build/                      # Cross-compilation build system
-│   ├── Dockerfile              # Docker build image for ARM cross-compilation
-│   ├── build_toolchain.sh      # Toolchain setup script
-│   ├── build_dependencies.sh   # Dependency build script (PortAudio, etc.)
-│   └── build_app.sh            # Application build script
-├── .devcontainer/              # Dev container config (GoLand, ARM cross-compile env)
-├── compose.yaml                # Docker Compose for cross-compilation pipeline
-├── go.mod                      # Module: websocket_client_chat
+│       └── audio.go                # Audio utilities (IsSilent, CalculateRMS, GenerateRequestID, etc.)
+├── build/                          # Cross-compilation build system
+│   ├── Dockerfile                  # Docker build image with OpenWrt ARM musl cross-compiler toolchain
+│   ├── build_toolchain.sh          # Toolchain setup script (extracts OpenWrt ARM toolchain)
+│   ├── build_dependencies.sh       # Dependency build script (ALSA-lib 1.2.8, PortAudio v190700)
+│   ├── build_app.sh                # Application build script (outputs to dist/)
+│   └── README.md                   # Docker build guide
+├── dist/                           # Build output directory (gitignored)
+├── .devcontainer/                  # Dev container config (GoLand, ARM cross-compile env)
+├── config.toml                     # Runtime config (access_token, debug, websocket_url)
+├── compose.yaml                    # Docker Compose for cross-compilation pipeline
+├── docker_build_app.sh/.bat        # Shortcut: docker compose run --rm builder
+├── docker_clear_cache.sh/.bat      # Shortcut: docker compose down --rmi all -v
+├── go.mod                          # Module: websocket_client_chat
 └── go.sum
 ```
 
@@ -125,7 +131,7 @@ leBotChatClient/
 Selectable via `-mode` CLI flag:
 
 1. **GPIO mode** (default, production): Continuous recording with wake word detection via GPIO 200
-2. **stdin mode** (development): Manual control via terminal input (`1`/`start`, `2`/`stop`, `q`/`quit`)
+2. **stdin mode** (development): Manual control via terminal input (`1`/`start`, `2`/`stop`, `3`/`test`, `q`/`quit`)
 3. **file mode**: Control via writing to `/tmp/chat-control`
 
 ### State Machine (GPIO mode)
@@ -235,9 +241,13 @@ Interruption is only allowed under strict conditions to prevent cross-person int
 ## Build & Deployment
 
 - **Cross-compilation**: ARM v7 target via Docker (see `compose.yaml`)
+- **Toolchain**: OpenWrt ARM musl cross-compiler (`arm-openwrt-linux-muslgnueabi-gcc`)
+- **Build dependencies**: ALSA-lib 1.2.8, PortAudio v190700 (cross-compiled for ARM)
 - **Build command**: `docker compose run builder` or use the dev container
+- **Build output**: `dist/chat_client_openwrt` (ARM ELF binary) + `dist/libportaudio.so.2`
+- **Shortcut scripts**: `docker_build_app.sh/.bat` (build), `docker_clear_cache.sh/.bat` (cleanup)
 - **Environment variables**: `CGO_ENABLED=1`, `GOOS=linux`, `GOARCH=arm`, `GOARM=7`
-- **Configuration**: Place `config.toml` next to the executable or in the working directory (see `internal/config/config.toml` for format)
+- **Configuration**: Place `config.toml` next to the executable or in the working directory
 - **Debug mode**: Set `debug = true` in `config.toml` for verbose logging
 
 ## Key Configuration Defaults
@@ -248,10 +258,20 @@ Interruption is only allowed under strict conditions to prevent cross-person int
 | Audio | Capture sample rate | 48000 Hz |
 | Audio | Channels / Bit depth | 1 (mono) / 16-bit |
 | Audio | Chunk duration | 200ms |
-| WebSocket | Reconnect delay | 5s |
+| WebSocket | Reconnect delay | 5s (exponential backoff, max 160s) |
 | WebSocket | Ping interval | 30s |
+| WebSocket | Write / Read timeout | 10s / 60s |
+| WebSocket | Max message size | 1 MB |
 | GPIO | Pin number | 200 (PG8) |
+| GPIO | Poll interval | 100ms |
 | Wake | Buffer duration | 8s |
+| Wake | Silence check interval | 2s |
+| Wake | Silence RMS threshold | 200.0 |
+| Wake | Silence ratio threshold | 0.95 |
+| Wake | Silence buffer duration | 3s |
+| Wake | WaitingResponse timeout | 30s (hardcoded) |
+| Wake | Cancel cooldown | 300ms |
+| Device | Serial number | `DEV-001` |
 | Device | Voice ID | `xiaole` |
 | Device | Timezone | `Asia/Shanghai` |
 
@@ -260,6 +280,9 @@ Interruption is only allowed under strict conditions to prevent cross-person int
 - Follow standard Go project layout (`cmd/`, `internal/`, `pkg/`)
 - Interface-driven design for testability (e.g., `MessageHandler`, `control.Handler`, `control.GpioHandler`, `audio.Handler`)
 - Concurrency managed via `context.Context`, `sync.Mutex`, and `sync/atomic`
+- Lock-free SPSC ring buffer with `atomic.Int64` cursors (ARM32 8-byte alignment safe)
+- Build-tag separation for platform-specific code (e.g., `suppress_linux_arm.go` / `suppress_default.go`)
+- Exponential backoff for WebSocket reconnection (base 5s, cap 160s, resets on success)
 - All code, comments, and documentation in English
 
 ## Maintaining This Document
